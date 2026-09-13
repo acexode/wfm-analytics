@@ -33,6 +33,15 @@ if (args.Contains("--replay-evidence-queue", StringComparer.Ordinal))
     return evidence.ReplayedPayloadCount == evidence.EncryptedPayloadCount && !evidence.PlaintextLeakDetected ? 0 : 1;
 }
 
+if (args.Contains("--export-evidence-artifacts", StringComparer.Ordinal))
+{
+    var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
+    var outputDirectory = ReadStringOption(args, "--out") ?? Path.Combine("tmp", "wp03-artifact-export");
+    var result = LiveEvidenceRunner.ExportArtifacts(queueRoot, outputDirectory);
+    Console.WriteLine(JsonSerializer.Serialize(result, CollectorJson.Options));
+    return 0;
+}
+
 if (args.Contains("--sample-live", StringComparer.Ordinal))
 {
     if (!OperatingSystem.IsWindows())
@@ -126,6 +135,7 @@ Console.WriteLine("Use --sample-live --duration-seconds 30 --out tmp/live-sample
 Console.WriteLine("Use --evidence-live --duration-seconds 120 --out tmp/wp03-live-evidence.json for the guided WP03 evidence report.");
 Console.WriteLine("Add --allow-window-titles, --allow-browser-urls, --allow-typed-text, --allow-screenshots, --allow-clipboard, or --allow-full-paths to test an expanded capture policy.");
 Console.WriteLine("Use --replay-evidence-queue --queue-root tmp/wp03-live-queue after a restart to verify queued payload replay.");
+Console.WriteLine("Use --export-evidence-artifacts --queue-root tmp/wp03-live-queue --out tmp/screenshots-review to decrypt screenshot artifacts for manual review.");
 return 0;
 
 static int ReadIntOption(string[] args, string name, int defaultValue)

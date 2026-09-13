@@ -23,6 +23,7 @@ public sealed record LiveEvidenceReport(
     [property: JsonPropertyName("policy")] CollectionPolicy Policy,
     [property: JsonPropertyName("batch")] CollectorBatch Batch,
     [property: JsonPropertyName("queue")] QueueEvidence Queue,
+    [property: JsonPropertyName("artifacts")] ArtifactEvidence Artifacts,
     [property: JsonPropertyName("resources")] IReadOnlyList<ResourceSample> Resources,
     [property: JsonPropertyName("sample_gaps")] IReadOnlyList<SampleGap> SampleGaps,
     [property: JsonPropertyName("notes")] IReadOnlyList<string> Notes);
@@ -36,6 +37,12 @@ public sealed record QueueEvidence(
     [property: JsonPropertyName("plaintext_leak_detected")] bool PlaintextLeakDetected,
     [property: JsonPropertyName("leaked_tokens")] IReadOnlyList<string> LeakedTokens,
     [property: JsonPropertyName("ciphertext_bytes")] long CiphertextBytes);
+
+public sealed record ArtifactEvidence(
+    [property: JsonPropertyName("encrypted_artifact_count")] int EncryptedArtifactCount,
+    [property: JsonPropertyName("ciphertext_bytes")] long CiphertextBytes,
+    [property: JsonPropertyName("plaintext_leak_detected")] bool PlaintextLeakDetected,
+    [property: JsonPropertyName("manifest_path")] string ManifestPath);
 
 public sealed record ResourceSample(
     [property: JsonPropertyName("at")] DateTimeOffset At,
@@ -68,7 +75,6 @@ public static class LiveEvidenceRunner
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".");
         Directory.CreateDirectory(options.QueueRoot);
-        var screenshotDirectory = Path.Combine(options.QueueRoot, "screenshots");
 
         var bootId = CollectorRuntimeIdentity.CreateBootId();
         var sessionId = CollectorRuntimeIdentity.CreateSessionId();
@@ -82,6 +88,9 @@ public static class LiveEvidenceRunner
         var stopwatch = Stopwatch.StartNew();
         var previousSampleAt = started;
         using var process = Process.GetCurrentProcess();
+        var key = WindowsDpapiKeyStore.LoadOrCreateKey(Path.Combine(options.QueueRoot, ProtectedKeyFileName));
+        var protector = new AesGcmPayloadProtector(key);
+        var artifactStore = new EncryptedArtifactStore(options.QueueRoot, protector);
 
         while (stopwatch.Elapsed < TimeSpan.FromSeconds(options.DurationSeconds))
         {
@@ -102,7 +111,7 @@ public static class LiveEvidenceRunner
                     Sensitive = MergeSensitiveObservation(
                         observation.Sensitive,
                         policy.SensitiveCapture.Clipboard ? WindowsClipboardReader.TryReadText() : null,
-                        policy.SensitiveCapture.Screenshots ? WindowsScreenshotCapture.TryCaptureDesktopBmp(screenshotDirectory, now) : null)
+                        CaptureScreenshotArtifact(policy, artifactStore, now))
                 };
             }
 
@@ -124,7 +133,8 @@ public static class LiveEvidenceRunner
         }
 
         var batch = new CollectorBatch("1.0", Guid.NewGuid(), "0.1.0-live-evidence", policy.PolicyVersion, completed);
-        var queue = WriteAndInspectQueue(options.QueueRoot, completed);
+        var queue = WriteAndInspectQueue(options.QueueRoot, completed, protector);
+        var artifacts = InspectArtifacts(options.QueueRoot, artifactStore);
         var notes = new[]
         {
             "Manual live evidence only. This report supports WP03 but does not authorize employee deployment.",
@@ -132,14 +142,21 @@ public static class LiveEvidenceRunner
                 ? "Expanded sensitive capture policy is enabled for this manual evidence run. Treat the report and queue as sensitive data."
                 : "Minimum capture policy is enabled; window titles, URLs, text, screenshots, clipboard and full paths are not collected.",
             policy.SensitiveCapture.Screenshots
-                ? $"Screenshots are saved as BMP files under {Path.GetFullPath(screenshotDirectory)} and referenced from slice sensitive.screenshot_ref."
+                ? "Screenshots are encrypted as local artifacts and referenced from slice sensitive.screenshot_ref. Use --export-evidence-artifacts to decrypt a review copy."
                 : "Screenshot capture is disabled.",
             "Lock detection uses interactive desktop accessibility and must be confirmed on the controlled company Windows device."
         };
 
-        var report = new LiveEvidenceReport(started, DateTimeOffset.UtcNow, options.IntervalMs, bootId, sessionId, collectorInstanceId, policy, batch, queue, resources, gaps, notes);
+        var report = new LiveEvidenceReport(started, DateTimeOffset.UtcNow, options.IntervalMs, bootId, sessionId, collectorInstanceId, policy, batch, queue, artifacts, resources, gaps, notes);
         await File.WriteAllTextAsync(options.OutputPath, JsonSerializer.Serialize(report, CollectorJson.Options), cancellationToken);
         return report;
+    }
+
+    public static ArtifactExportResult ExportArtifacts(string queueRoot, string outputDirectory)
+    {
+        var key = WindowsDpapiKeyStore.LoadOrCreateKey(Path.Combine(queueRoot, ProtectedKeyFileName));
+        var store = new EncryptedArtifactStore(queueRoot, new AesGcmPayloadProtector(key));
+        return store.ExportAll(outputDirectory);
     }
 
     private static SensitiveObservation MergeSensitiveObservation(SensitiveObservation? current, string? clipboardText, string? screenshotRef)
@@ -150,6 +167,23 @@ public static class LiveEvidenceRunner
             ClipboardText = clipboardText ?? current.ClipboardText,
             ScreenshotRef = screenshotRef ?? current.ScreenshotRef
         };
+    }
+
+    private static string? CaptureScreenshotArtifact(CollectionPolicy policy, EncryptedArtifactStore artifactStore, DateTimeOffset now)
+    {
+        if (!policy.SensitiveCapture.Screenshots)
+        {
+            return null;
+        }
+
+        var bytes = WindowsScreenshotCapture.TryCaptureDesktopBmp();
+        if (bytes is null || bytes.Length == 0)
+        {
+            return null;
+        }
+
+        var artifact = artifactStore.Store("screenshot", now, "image/bmp", ".bmp", bytes);
+        return $"artifact:{artifact.ArtifactId:N}";
     }
 
     public static QueueEvidence ReplayQueue(string queueRoot)
@@ -179,11 +213,9 @@ public static class LiveEvidenceRunner
             ciphertextFiles.Sum(path => new FileInfo(path).Length));
     }
 
-    private static QueueEvidence WriteAndInspectQueue(string queueRoot, IReadOnlyList<ActivityEnvelope> envelopes)
+    private static QueueEvidence WriteAndInspectQueue(string queueRoot, IReadOnlyList<ActivityEnvelope> envelopes, AesGcmPayloadProtector protector)
     {
-        var keyPath = Path.Combine(queueRoot, ProtectedKeyFileName);
-        var key = WindowsDpapiKeyStore.LoadOrCreateKey(keyPath);
-        var queue = new FileBackedEncryptedQueue(queueRoot, new AesGcmPayloadProtector(key));
+        var queue = new FileBackedEncryptedQueue(queueRoot, protector);
         foreach (var envelope in envelopes)
         {
             queue.Enqueue(envelope);
@@ -213,6 +245,18 @@ public static class LiveEvidenceRunner
             leakedTokens.Count > 0,
             leakedTokens,
             ciphertextBytes);
+    }
+
+    private static ArtifactEvidence InspectArtifacts(string queueRoot, EncryptedArtifactStore store)
+    {
+        var artifacts = store.List();
+        var ciphertextBytes = artifacts.Sum(artifact => new FileInfo(artifact.CiphertextPath).Length);
+        var leak = artifacts.Any(artifact => ContainsAscii(File.ReadAllBytes(artifact.CiphertextPath), "BM"));
+        return new ArtifactEvidence(
+            artifacts.Count,
+            ciphertextBytes,
+            leak,
+            Path.GetFullPath(Path.Combine(queueRoot, "artifacts", "manifest.jsonl")));
     }
 
     private static bool ReplayIdentityMatches(IReadOnlyList<ActivityEnvelope> expected, IReadOnlyList<ActivityEnvelope> replayed)

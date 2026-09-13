@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using WfmAnalytics.Server.Database;
 using WfmAnalytics.Server.Identity;
 using WfmAnalytics.Server.Modules.Demo;
+using WfmAnalytics.Server.Modules.Ingestion;
 
 namespace WfmAnalytics.Server.Bootstrap;
 
@@ -26,6 +27,8 @@ public static class ServerApplication
         };
 
         var builder = WebApplication.CreateBuilder(options);
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole();
         if (!string.IsNullOrWhiteSpace(urls))
         {
             builder.WebHost.UseUrls(urls);
@@ -63,6 +66,7 @@ public static class ServerApplication
         MapHealthEndpoints(app);
         app.MapDemoEndpoints();
         app.MapDailyReportEndpoints();
+        app.MapActivityIngestionEndpoints();
 
         return app;
     }

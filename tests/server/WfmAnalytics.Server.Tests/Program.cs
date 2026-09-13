@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -101,7 +102,7 @@ static async Task DevelopmentHeadersAreIgnoredInProduction()
 static Task MigrationCatalogIsValid()
 {
     var catalog = new EmbeddedMigrationCatalog();
-    Equal(2, catalog.Migrations.Count);
+    Equal(3, catalog.Migrations.Count);
     Equal(1L, catalog.Migrations[0].Version);
     Equal(64, catalog.Migrations[0].Sha256.Length);
     True(catalog.Migrations[0].Sql.Contains("platform.schema_migrations", StringComparison.Ordinal), "Migration ledger is missing.");
@@ -195,6 +196,7 @@ static async Task DatabaseIntegration()
             using var response = await client.GetAsync("/api/v1/teams/team-synthetic/daily?date=2026-09-13");
             Equal(HttpStatusCode.Forbidden, response.StatusCode);
         });
+        await WithServer("Development", AssertActivityIngestion);
         await using var production = ServerApplication.Build(environmentName: "Production");
         try
         {
@@ -226,6 +228,82 @@ static async Task DatabaseIntegration()
         Environment.SetEnvironmentVariable("ConnectionStrings__Primary", oldPrimary);
         Environment.SetEnvironmentVariable("ConnectionStrings__Migration", oldMigration);
     }
+}
+
+static async Task AssertActivityIngestion(HttpClient client)
+{
+    var enrollment = Guid.NewGuid().ToString();
+    var eventId = Guid.NewGuid().ToString();
+    var secondEventId = Guid.NewGuid().ToString();
+    var collectorInstanceId = Guid.NewGuid().ToString();
+    var first = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "teams.exe");
+    client.DefaultRequestHeaders.Add("X-WFM-Enrollment-Id", enrollment);
+
+    using var accepted = await client.PostAsync("/api/v1/activity/batches", Json(first));
+    Equal(HttpStatusCode.OK, accepted.StatusCode);
+    using (var payload = System.Text.Json.JsonDocument.Parse(await accepted.Content.ReadAsStringAsync()))
+    {
+        Equal("accepted", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
+    }
+
+    using var duplicate = await client.PostAsync("/api/v1/activity/batches", Json(first));
+    Equal(HttpStatusCode.OK, duplicate.StatusCode);
+    using (var payload = System.Text.Json.JsonDocument.Parse(await duplicate.Content.ReadAsStringAsync()))
+    {
+        Equal("already_accepted", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
+    }
+
+    var changedSameEvent = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "chrome.exe");
+    using var conflict = await client.PostAsync("/api/v1/activity/batches", Json(changedSameEvent));
+    Equal(HttpStatusCode.OK, conflict.StatusCode);
+    using (var payload = System.Text.Json.JsonDocument.Parse(await conflict.Content.ReadAsStringAsync()))
+    {
+        Equal("rejected", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
+        Equal("event_checksum_conflict", payload.RootElement.GetProperty("outcomes")[0].GetProperty("rejection_reason").GetString() ?? "");
+    }
+
+    var sequenceConflict = ActivityBatchJson(secondEventId, collectorInstanceId, sequence: 0, app: "word.exe");
+    using var sequenceConflictResponse = await client.PostAsync("/api/v1/activity/batches", Json(sequenceConflict));
+    Equal(HttpStatusCode.OK, sequenceConflictResponse.StatusCode);
+    using (var payload = System.Text.Json.JsonDocument.Parse(await sequenceConflictResponse.Content.ReadAsStringAsync()))
+    {
+        Equal("rejected", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
+        Equal("sequence_conflict", payload.RootElement.GetProperty("outcomes")[0].GetProperty("rejection_reason").GetString() ?? "");
+    }
+}
+
+static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");
+
+static string ActivityBatchJson(string eventId, string collectorInstanceId, long sequence, string app)
+{
+    return $$"""
+    {
+      "schema_version": "1.0",
+      "batch_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "agent_version": "0.1.0-test",
+      "policy_version": "test",
+      "events": [
+        {
+          "event_id": "{{eventId}}",
+          "boot_id": "test-boot",
+          "session_id": "test-session",
+          "collector_instance_id": "{{collectorInstanceId}}",
+          "sequence": {{sequence}},
+          "bucket_start": "2026-09-13T09:00:00Z",
+          "bucket_end": "2026-09-13T09:01:00Z",
+          "coarsened": false,
+          "slices": [
+            {
+              "start_offset_ms": 0,
+              "end_offset_ms": 60000,
+              "application_id": "{{app}}",
+              "state": "active"
+            }
+          ]
+        }
+      ]
+    }
+    """;
 }
 
 static void Equal<T>(T expected, T actual)

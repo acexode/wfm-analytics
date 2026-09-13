@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("partial buckets stop at last healthy sample", PartialBucketsStopAtLastHealthySample),
     ("encrypted queue replays exact envelope without plaintext leak", EncryptedQueueReplay),
     ("DPAPI queue key survives process-style reload on Windows", DpapiQueueKeySurvivesReload),
+    ("encrypted artifact store hides screenshot bytes and exports on demand", EncryptedArtifactStoreExport),
     ("sensitive fields are dropped unless policy enables them", SensitiveFieldsRequirePolicy),
     ("collector batch JSON uses accepted snake_case contract names", CollectorBatchJsonUsesContractNames),
 };
@@ -196,6 +197,24 @@ static void DpapiQueueKeySurvivesReload()
 
     Equal(envelope.EventId, replay.EventId);
     Equal("reload.exe", replay.Slices.Single().ApplicationId ?? "");
+}
+
+static void EncryptedArtifactStoreExport()
+{
+    var root = Path.Combine(Path.GetTempPath(), "wfm-artifact-tests", Guid.NewGuid().ToString("N"));
+    var exportRoot = Path.Combine(root, "export");
+    var store = new EncryptedArtifactStore(root, new AesGcmPayloadProtector(RandomNumberGenerator.GetBytes(32)));
+    var bytes = Encoding.ASCII.GetBytes("BM fake screenshot bytes");
+    var artifact = store.Store("screenshot", DateTimeOffset.Parse("2026-09-13T09:00:00Z"), "image/bmp", ".bmp", bytes);
+
+    var ciphertext = File.ReadAllBytes(artifact.CiphertextPath);
+    True(!Encoding.ASCII.GetString(ciphertext).Contains("BM fake", StringComparison.Ordinal), "Artifact ciphertext leaked screenshot header/content.");
+    Equal(bytes.Length, store.Read(artifact).Length);
+
+    var export = store.ExportAll(exportRoot);
+    Equal(1, export.ExportedCount);
+    True(File.Exists(export.Files.Single()), "Exported artifact file was not written.");
+    True(Encoding.ASCII.GetString(File.ReadAllBytes(export.Files.Single())).StartsWith("BM fake", StringComparison.Ordinal), "Exported artifact did not decrypt original bytes.");
 }
 
 static ActivityEnvelope BuildEnvelope(params RawObservation[] observations)

@@ -29,7 +29,7 @@ WP03 Windows feasibility. Owner: endpoint role. Reviewer still required: platfor
 - Added collector tests for application identifier normalization, idle threshold boundary behavior, lock precedence, ordered/capped slices, partial-bucket truncation at the last healthy sample, encrypted replay without plaintext application leakage, and JSON contract naming.
 - Added a live evidence command that captures foreground app slices, resource samples, sample gaps, encrypted queue replay, and ciphertext plaintext inspection into one JSON report.
 - Added policy switches for expanded sensitive capture and tests proving sensitive fields are dropped under the default minimum policy.
-- Added policy-gated clipboard text capture and BMP screenshot capture for physical Windows evidence runs.
+- Added policy-gated clipboard text capture and encrypted BMP screenshot artifact capture for physical Windows evidence runs. Screenshot artifacts now stay encrypted under the queue root until explicitly exported for review.
 - Added a separate queue replay command for process-restart-style verification under the same Windows user.
 - Added collector project to the existing solution and added the collector test project to `tools/verify.sh`.
 - Added a repository-local `NuGet.Config` and local environment defaults so .NET validation can run without reading protected user-profile NuGet config.
@@ -45,7 +45,9 @@ WP03 Windows feasibility. Owner: endpoint role. Reviewer still required: platfor
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --replay-evidence-queue --queue-root tmp\wp03-smoke-queue-dpapi`: passed; replayed one encrypted payload with matching identity and `windows-dpapi-current-user` key protection.
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 5 --interval-ms 1000 --out tmp\wp03-expanded-smoke-evidence.json --queue-root tmp\wp03-expanded-smoke-queue --allow-window-titles --allow-full-paths`: passed; wrote an expanded-policy smoke report, one encrypted payload, and no plaintext leak.
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --replay-evidence-queue --queue-root tmp\wp03-expanded-smoke-queue`: passed; replayed one expanded-policy encrypted payload with matching identity and `windows-dpapi-current-user` key protection.
-- `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 3 --interval-ms 1000 --out tmp\wp03-screenshot-clipboard-smoke.json --queue-root tmp\wp03-screenshot-clipboard-queue --allow-screenshots --allow-clipboard`: passed; clipboard text was captured in the evidence JSON on this host, while screenshot capture produced no file from the Codex background execution context.
+- `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 3 --interval-ms 1000 --out tmp\wp03-screenshot-clipboard-smoke.json --queue-root tmp\wp03-screenshot-clipboard-queue --allow-screenshots --allow-clipboard`: passed; clipboard text was captured in the evidence JSON on this host, while screenshot capture produced no artifact from the Codex background execution context.
+- Collector tests include an encrypted artifact-store check proving screenshot-like bytes are not visible in ciphertext and can be exported on demand.
+- `dotnet run --no-build --project tests/collector/WfmAnalytics.Collector.Tests`: passed ten collector test groups after local storage hardening.
 - User manually tested live foreground app switching with real applications and reported the behavior verified.
 
 ## Checks not run

@@ -15,14 +15,13 @@ public static class WindowsScreenshotCapture
     private const int BiRgb = 0;
     private const uint DibRgbColors = 0;
 
-    public static string? TryCaptureDesktopBmp(string outputDirectory, DateTimeOffset timestampUtc)
+    public static byte[]? TryCaptureDesktopBmp()
     {
         if (!OperatingSystem.IsWindows())
         {
             return null;
         }
 
-        Directory.CreateDirectory(outputDirectory);
         var width = GetSystemMetrics(SmCxVirtualScreen);
         var height = GetSystemMetrics(SmCyVirtualScreen);
         var left = GetSystemMetrics(SmXVirtualScreen);
@@ -63,9 +62,7 @@ public static class WindowsScreenshotCapture
                 return null;
             }
 
-            var path = Path.Combine(outputDirectory, $"screenshot-{timestampUtc:yyyyMMdd-HHmmss-fff}.bmp");
-            SaveBitmap(screenDc, bitmap, width, height, path);
-            return Path.GetFullPath(path);
+            return CreateBitmapBytes(screenDc, bitmap, width, height);
         }
         finally
         {
@@ -88,7 +85,7 @@ public static class WindowsScreenshotCapture
         }
     }
 
-    private static void SaveBitmap(IntPtr screenDc, IntPtr bitmap, int width, int height, string path)
+    private static byte[] CreateBitmapBytes(IntPtr screenDc, IntPtr bitmap, int width, int height)
     {
         var header = new BitmapInfoHeader
         {
@@ -108,7 +105,7 @@ public static class WindowsScreenshotCapture
             throw new InvalidOperationException("Windows screenshot capture failed while reading bitmap bits.");
         }
 
-        using var stream = File.Create(path);
+        using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
         var pixelOffset = 14 + header.BiSize;
         var fileSize = pixelOffset + pixels.Length;
@@ -130,6 +127,8 @@ public static class WindowsScreenshotCapture
         writer.Write(0);
         writer.Write(0);
         writer.Write(pixels);
+        writer.Flush();
+        return stream.ToArray();
     }
 
     [DllImport("user32.dll")]
