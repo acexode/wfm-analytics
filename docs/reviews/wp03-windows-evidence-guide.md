@@ -61,6 +61,29 @@ Verify restart-style replay from a separate collector process:
 & 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --replay-evidence-queue --queue-root tmp\wp03-live-queue
 ```
 
+Upload queued envelopes to the local development API after running server migrations and starting the API:
+
+```powershell
+$migrationPassword=(Get-Content .local\migration-password)
+$appPassword=((Get-Content .local\database.env | Where-Object { $_ -like 'WFM_APP_PASSWORD=*' }) -replace 'WFM_APP_PASSWORD=','')
+$env:ConnectionStrings__Primary="Host=127.0.0.1;Port=55432;Database=wfm_dev;Username=wfm_app;Password=$appPassword"
+$env:ConnectionStrings__Migration="Host=127.0.0.1;Port=55432;Database=wfm_dev;Username=wfm_migrator;Password=$migrationPassword"
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://127.0.0.1:5080'
+
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/server/WfmAnalytics.Server -- --migrate
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/server/WfmAnalytics.Server -- --seed-development
+
+# In a separate PowerShell window, keep the API running:
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --no-launch-profile --project src/server/WfmAnalytics.Server
+
+# Then upload the queue:
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --upload-evidence-queue --queue-root tmp\wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd
+
+# Confirm the daily report now uses live development evidence:
+Invoke-RestMethod -Uri 'http://127.0.0.1:5080/api/v1/teams/team-synthetic/daily?date=2026-09-13' -Headers @{'X-Development-Principal'='demo-manager'; 'X-Development-Scopes'='analytics:daily:read'} | ConvertTo-Json -Depth 8
+```
+
 Expected evidence:
 
 - focused applications appear as executable basenames such as `teams.exe`, `ms-teams.exe`, `chrome.exe`, or `notepad.exe`;
@@ -75,5 +98,7 @@ Expected evidence:
 - `plaintext_leak_detected` is `false`;
 - resource samples are present for the collector process;
 - sleep/resume or long interruption appears as a sample gap instead of fabricated activity.
+- successful upload reports `accepted` or `already_accepted` outcomes and acknowledges only those queue items;
+- the daily report returns `synthetic: false` for dates with uploaded live development evidence, while completed output remains unavailable until an approved operational source is connected.
 
 Record the command output and keep `tmp\wp03-live-evidence.json` with the review notes. This evidence supports WP03 only; it does not authorize employee deployment or close the full G1 gate without independent review and the remaining controlled-device checks.

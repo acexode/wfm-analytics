@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 using WfmAnalytics.Server.Database;
 using WfmAnalytics.Server.Identity;
+using WfmAnalytics.Server.Modules.Analytics;
 using WfmAnalytics.Server.Modules.Demo;
 using WfmAnalytics.Server.Modules.Ingestion;
 
@@ -42,9 +42,7 @@ public static class ServerApplication
 
         builder.Services.AddSingleton<IMigrationCatalog, EmbeddedMigrationCatalog>();
         builder.Services.AddSingleton<PostgresDatabase>();
-        // No cookie authentication exists in WP02. Keep generated development keys out of
-        // user profiles; WP05 must configure durable protected keys with company identity.
-        builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
+        builder.Services.AddSingleton<ActivityDailyAggregator>();
 
         builder.Services
             .AddAuthentication(DevelopmentAuthenticationScheme)

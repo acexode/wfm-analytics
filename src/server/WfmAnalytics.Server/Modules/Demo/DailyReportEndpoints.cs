@@ -22,7 +22,20 @@ public static class DailyReportEndpoints
                 grant.Parameters.AddWithValue(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
                 grant.Parameters.AddWithValue(teamId);
                 if (await grant.ExecuteScalarAsync(token) is not true) return Results.Forbid();
-                await using var query = new NpgsqlCommand("SELECT payload::text FROM analytics.synthetic_daily_reports WHERE team_id=$1 AND report_date=$2", connection);
+                await using var query = new NpgsqlCommand("""
+                    SELECT payload::text
+                    FROM analytics.activity_daily_reports
+                    WHERE team_id=$1 AND report_date=$2
+                    UNION ALL
+                    SELECT payload::text
+                    FROM analytics.synthetic_daily_reports
+                    WHERE team_id=$1 AND report_date=$2
+                      AND NOT EXISTS (
+                          SELECT 1 FROM analytics.activity_daily_reports
+                          WHERE team_id=$1 AND report_date=$2
+                      )
+                    LIMIT 1
+                    """, connection);
                 query.Parameters.AddWithValue(teamId);
                 query.Parameters.AddWithValue(reportDate);
                 var payload = await query.ExecuteScalarAsync(token) as string;
