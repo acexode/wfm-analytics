@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "batch_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "agent_version": "0.1.0",
+  "policy_version": "test-1",
+  "events": [
+    {
+      "event_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "boot_id": "synthetic-boot",
+      "session_id": "synthetic-session",
+      "collector_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "sequence": 0,
+      "bucket_start": "2026-09-13T09:00:00Z",
+      "bucket_end": "2026-09-13T09:01:00Z",
+      "coarsened": false,
+      "slices": [
+        {
+          "start_offset_ms": 0,
+          "end_offset_ms": 60000,
+          "application_id": "synthetic.exe",
+          "state": "active"
+        }
+      ]
+    }
+  ]
+}
+

@@ -1,0 +1,5 @@
+# WP01 author delivery report
+
+13 September 2026. Implemented first-slice JSON Schema and OpenAPI contracts under contracts/, shared synthetic report and batch examples, schedule/output CSV examples, and 12 interval reconciliation reference cases. Coordinated daily-report fields directly with backend and frontend authors. Team identity is team-synthetic; report date 2026-09-13. Schema fields use snake_case; report explicitly identifies synthetic data, source freshness, coverage, unavailable output, versions, timezone and units.
+
+Lead review accepted the package after adding the durable ingestion acknowledgement contract, checking all OpenAPI request/response references, requiring non-empty event slices, and rerunning the suite. Actual check: `python3 -m unittest discover -s tests/contracts -v` passed seven test methods, including all 12 reference cases, on local Python 3.12. Tests do not implement production aggregation, ingestion durability, source imports, deployment identity, or Windows behavior. No numbered baseline was changed by this package.

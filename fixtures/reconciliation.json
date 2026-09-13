@@ -1,0 +1,378 @@
+[
+  {
+    "id": "healthy",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "active",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 3600,
+      "inactive_seconds": 0,
+      "unknown_seconds": 0,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 3600
+    }
+  },
+  {
+    "id": "missing-is-unknown",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 0,
+      "inactive_seconds": 0,
+      "unknown_seconds": 3600,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 0
+    }
+  },
+  {
+    "id": "inactive-not-missing",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "inactive",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 0,
+      "inactive_seconds": 1800,
+      "unknown_seconds": 1800,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 1800
+    }
+  },
+  {
+    "id": "locked-overrides-active-same-session",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "active",
+        "source": "a"
+      },
+      {
+        "start": "2026-09-13T09:15:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "locked",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 2700,
+      "inactive_seconds": 900,
+      "unknown_seconds": 0,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 3600
+    }
+  },
+  {
+    "id": "conflicting-devices",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:45:00Z",
+        "state": "active",
+        "source": "a"
+      },
+      {
+        "start": "2026-09-13T09:30:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "inactive",
+        "source": "b"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 1800,
+      "inactive_seconds": 900,
+      "unknown_seconds": 0,
+      "conflict_seconds": 900,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 3600
+    }
+  },
+  {
+    "id": "annotation-does-not-improve-coverage",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "active",
+        "source": "a"
+      }
+    ],
+    "annotations": [
+      {
+        "start": "2026-09-13T09:30:00Z",
+        "end": "2026-09-13T09:45:00Z",
+        "approved": true
+      }
+    ],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 1800,
+      "inactive_seconds": 0,
+      "unknown_seconds": 900,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 900,
+      "telemetry_seconds": 1800
+    }
+  },
+  {
+    "id": "duplicate-source-no-double-count",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "active",
+        "source": "a"
+      },
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "active",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 1800,
+      "inactive_seconds": 0,
+      "unknown_seconds": 1800,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 1800
+    }
+  },
+  {
+    "id": "coarsened-suffix-unknown",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "state": "active",
+        "source": "a"
+      },
+      {
+        "start": "2026-09-13T09:30:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "detail_unavailable",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 1800,
+      "inactive_seconds": 0,
+      "unknown_seconds": 1800,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 1800
+    }
+  },
+  {
+    "id": "cross-midnight",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T23:30:00Z",
+        "end": "2026-09-14T00:30:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T23:30:00Z",
+        "end": "2026-09-14T00:30:00Z",
+        "state": "active",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 1800,
+      "active_seconds": 1800,
+      "inactive_seconds": 0,
+      "unknown_seconds": 0,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 1800
+    }
+  },
+  {
+    "id": "dst-spring-short-day",
+    "report_date": "2026-03-08",
+    "timezone": "America/New_York",
+    "schedule": [
+      {
+        "start": "2026-03-08T05:00:00Z",
+        "end": "2026-03-09T04:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-03-08T05:00:00Z",
+        "end": "2026-03-09T04:00:00Z",
+        "state": "active",
+        "source": "a"
+      }
+    ],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 82800,
+      "active_seconds": 82800,
+      "inactive_seconds": 0,
+      "unknown_seconds": 0,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 82800
+    }
+  },
+  {
+    "id": "dst-autumn-long-day",
+    "report_date": "2026-11-01",
+    "timezone": "America/New_York",
+    "schedule": [
+      {
+        "start": "2026-11-01T04:00:00Z",
+        "end": "2026-11-02T05:00:00Z"
+      }
+    ],
+    "observations": [],
+    "annotations": [],
+    "expected": {
+      "eligible_seconds": 90000,
+      "active_seconds": 0,
+      "inactive_seconds": 0,
+      "unknown_seconds": 90000,
+      "conflict_seconds": 0,
+      "approved_non_desktop_seconds": 0,
+      "telemetry_seconds": 0
+    }
+  },
+  {
+    "id": "annotation-precedes-conflict",
+    "report_date": "2026-09-13",
+    "timezone": "UTC",
+    "schedule": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z"
+      }
+    ],
+    "observations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "active",
+        "source": "a"
+      },
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T10:00:00Z",
+        "state": "inactive",
+        "source": "b"
+      }
+    ],
+    "annotations": [
+      {
+        "start": "2026-09-13T09:00:00Z",
+        "end": "2026-09-13T09:30:00Z",
+        "approved": true
+      }
+    ],
+    "expected": {
+      "eligible_seconds": 3600,
+      "active_seconds": 0,
+      "inactive_seconds": 0,
+      "unknown_seconds": 0,
+      "conflict_seconds": 1800,
+      "approved_non_desktop_seconds": 1800,
+      "telemetry_seconds": 3600
+    }
+  }
+]

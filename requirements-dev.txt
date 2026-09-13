@@ -1,0 +1,2 @@
+# Development contract validation only; no Python runtime dependency in the product.
+jsonschema==4.21.1

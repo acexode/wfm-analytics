@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "batch_id": "8a449c35-a781-4ed2-afd3-807f9b714f06",
+  "outcomes": [{
+    "event_id": "7cb4e49b-fbed-4fb8-af65-73a9902f5d46",
+    "status": "accepted",
+    "rejection_reason": null
+  }]
+}

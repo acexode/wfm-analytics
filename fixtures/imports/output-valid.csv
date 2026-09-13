@@ -1,0 +1,2 @@
+source_id,employee_id,report_date,work_type,completed_count,reviewed_count,passed_count
+synthetic-output-1,synthetic-001,2026-09-13,synthetic-cases,10,4,3

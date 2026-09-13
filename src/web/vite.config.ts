@@ -1,0 +1,15 @@
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:5050',
+        // Fixed synthetic identity exists only in the loopback development proxy.
+        headers: {'X-Development-Principal': 'demo-manager'}
+      }
+    }
+  }
+});

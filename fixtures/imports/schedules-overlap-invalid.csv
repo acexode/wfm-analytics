@@ -1,0 +1,3 @@
+source_id,employee_id,start,end,timezone
+synthetic-shift-1,synthetic-001,2026-09-13T08:00:00+01:00,2026-09-13T12:00:00+01:00,Africa/Lagos
+synthetic-shift-2,synthetic-001,2026-09-13T11:00:00+01:00,2026-09-13T17:00:00+01:00,Africa/Lagos

@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "synthetic",
+    "team_id",
+    "team_name",
+    "report_date",
+    "timezone",
+    "report_revision",
+    "definition_version",
+    "computed_at",
+    "units",
+    "freshness",
+    "employees"
+  ],
+  "properties": {
+    "team_name": {"type": "string", "minLength": 1},
+    "schema_version": {
+      "const": "1.0"
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "team_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "definition_version": {
+      "const": "1.0"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "units": {
+      "const": "seconds"
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "last_received_at"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+          "unknown"
+          ]
+        },
+        "last_received_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "employees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "employee_id",
+          "display_name",
+          "eligible_seconds",
+          "categories",
+          "telemetry_coverage",
+          "output"
+        ],
+        "properties": {
+          "display_name": {"type": "string", "minLength": 1},
+          "employee_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "eligible_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "categories": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "approved_non_desktop_seconds",
+              "conflict_seconds",
+              "inactive_seconds",
+              "active_seconds",
+              "unknown_seconds"
+            ],
+            "properties": {
+              "approved_non_desktop_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "conflict_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "inactive_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "active_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unknown_seconds": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "telemetry_coverage": {
+            "if": {"properties": {"value": {"type": "null"}}},
+            "then": {"properties": {"unavailable_reason": {"type": "string", "minLength": 1}}},
+            "else": {"properties": {"unavailable_reason": {"type": "null"}}},
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "unavailable_reason"
+            ],
+            "properties": {
+              "value": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1
+              },
+              "unavailable_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "output": {
+            "if": {"properties": {"completed_count": {"type": "null"}}},
+            "then": {"properties": {"unavailable_reason": {"type": "string", "minLength": 1}}},
+            "else": {"properties": {"unavailable_reason": {"type": "null"}}},
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "completed_count",
+              "unavailable_reason"
+            ],
+            "properties": {
+              "completed_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "unavailable_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

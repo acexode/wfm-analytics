@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WfmAnalytics.Server/WfmAnalytics.Server.csproj" />
+  <Project Path="../../tests/server/WfmAnalytics.Server.Tests/WfmAnalytics.Server.Tests.csproj" />
+</Solution>

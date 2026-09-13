@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "team_id": "team-synthetic",
+  "team_name": "Synthetic Operations",
+  "report_date": "2026-09-13",
+  "timezone": "Africa/Lagos",
+  "report_revision": 1,
+  "definition_version": "1.0",
+  "computed_at": "2026-09-13T10:00:00Z",
+  "units": "seconds",
+  "freshness": {
+    "status": "unknown",
+    "last_received_at": null
+  },
+  "employees": [
+    {
+      "employee_id": "synthetic-001",
+      "display_name": "Synthetic Employee 001",
+      "eligible_seconds": 3600,
+      "categories": {
+        "approved_non_desktop_seconds": 0,
+        "conflict_seconds": 0,
+        "inactive_seconds": 600,
+        "active_seconds": 2400,
+        "unknown_seconds": 600
+      },
+      "telemetry_coverage": {
+        "value": 0.8333333333333334,
+        "unavailable_reason": null
+      },
+      "output": {
+        "completed_count": null,
+        "unavailable_reason": "source_not_connected"
+      }
+    }
+  ]
+}

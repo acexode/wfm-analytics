@@ -1,0 +1,7 @@
+[
+  {"name":"category_sum", "path":["employees",0,"categories","active_seconds"],"value":2401,"layer":"semantic"},
+  {"name":"coverage_range", "path":["employees",0,"telemetry_coverage","value"],"value":1.1,"layer":"schema"},
+  {"name":"null_without_reason", "path":["employees",0,"output","unavailable_reason"],"value":"","layer":"schema"},
+  {"name":"available_with_reason", "path":["employees",0,"telemetry_coverage","unavailable_reason"],"value":"missing","layer":"schema"},
+  {"name":"nested_sensitive", "path":["employees",0,"window_title"],"value":"forbidden","layer":"schema"}
+]

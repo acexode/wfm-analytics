@@ -1,0 +1,3 @@
+source_id,employee_id,display_name,team_id,effective_start,effective_end
+synthetic-roster-1,synthetic-001,Synthetic Employee 001,team-synthetic,2026-09-01,2026-10-01
+synthetic-roster-1,,Synthetic Employee 002,team-synthetic,2026-10-01,2026-09-01
