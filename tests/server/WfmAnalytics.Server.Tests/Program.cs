@@ -102,7 +102,7 @@ static async Task DevelopmentHeadersAreIgnoredInProduction()
 static Task MigrationCatalogIsValid()
 {
     var catalog = new EmbeddedMigrationCatalog();
-    Equal(3, catalog.Migrations.Count);
+    Equal(5, catalog.Migrations.Count);
     Equal(1L, catalog.Migrations[0].Version);
     Equal(64, catalog.Migrations[0].Sha256.Length);
     True(catalog.Migrations[0].Sql.Contains("platform.schema_migrations", StringComparison.Ordinal), "Migration ledger is missing.");
@@ -172,6 +172,7 @@ static async Task DatabaseIntegration()
         await database.ApplyMigrationsAsync();
         await database.ApplyMigrationsAsync();
         True(await database.IsReadyAsync(), "Database did not become ready after repeat migration.");
+        await ClearActivityReportsAsync(testConnection);
         await DevelopmentSeeder.SeedAsync(database, app.Environment, "fixtures/daily-report.json");
         await DevelopmentSeeder.SeedAsync(database, app.Environment, "fixtures/daily-report.json");
         await WithServer("Development", async client =>
@@ -230,14 +231,43 @@ static async Task DatabaseIntegration()
     }
 }
 
+static async Task ClearActivityReportsAsync(string testConnection)
+{
+    await using var connection = new NpgsqlConnection(testConnection);
+    await connection.OpenAsync();
+    await using var clear = new NpgsqlCommand("DELETE FROM analytics.activity_daily_reports; DELETE FROM ingestion.activity_dirty_days; DELETE FROM ingestion.activity_envelopes; DELETE FROM ingestion.ingestion_receipts;", connection);
+    await clear.ExecuteNonQueryAsync();
+}
+
 static async Task AssertActivityIngestion(HttpClient client)
 {
-    var enrollment = Guid.NewGuid().ToString();
+    var enrollment = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     var eventId = Guid.NewGuid().ToString();
     var secondEventId = Guid.NewGuid().ToString();
     var collectorInstanceId = Guid.NewGuid().ToString();
-    var first = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "teams.exe");
+    var bucketStart = DateTimeOffset.UtcNow.AddMinutes(-2);
+    bucketStart = new DateTimeOffset(bucketStart.Year, bucketStart.Month, bucketStart.Day, bucketStart.Hour, bucketStart.Minute, 0, TimeSpan.Zero);
+    var bucketEnd = bucketStart.AddMinutes(1);
+    var reportDate = bucketStart.ToString("yyyy-MM-dd");
+    var first = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "teams.exe", bucketStart, bucketEnd);
     client.DefaultRequestHeaders.Add("X-WFM-Enrollment-Id", enrollment);
+
+    using var invalidJson = await client.PostAsync("/api/v1/activity/batches", Json("{"));
+    Equal(HttpStatusCode.BadRequest, invalidJson.StatusCode);
+
+    using var unsupportedSchema = await client.PostAsync("/api/v1/activity/batches", Json("""{"schema_version":"2.0","batch_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","agent_version":"x","policy_version":"x","events":[]}"""));
+    Equal(HttpStatusCode.BadRequest, unsupportedSchema.StatusCode);
+
+    using var oversized = await client.PostAsync("/api/v1/activity/batches", Json(new string('x', 513 * 1024)));
+    Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
+
+    var future = ActivityBatchJson(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), sequence: 0, app: "future.exe", DateTimeOffset.UtcNow.AddMinutes(10), DateTimeOffset.UtcNow.AddMinutes(11));
+    using var futureResponse = await client.PostAsync("/api/v1/activity/batches", Json(future));
+    Equal(HttpStatusCode.BadRequest, futureResponse.StatusCode);
+
+    var old = ActivityBatchJson(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), sequence: 0, app: "old.exe", DateTimeOffset.UtcNow.AddDays(-8), DateTimeOffset.UtcNow.AddDays(-8).AddMinutes(1));
+    using var oldResponse = await client.PostAsync("/api/v1/activity/batches", Json(old));
+    Equal(HttpStatusCode.BadRequest, oldResponse.StatusCode);
 
     using var accepted = await client.PostAsync("/api/v1/activity/batches", Json(first));
     Equal(HttpStatusCode.OK, accepted.StatusCode);
@@ -253,7 +283,7 @@ static async Task AssertActivityIngestion(HttpClient client)
         Equal("already_accepted", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
     }
 
-    var changedSameEvent = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "chrome.exe");
+    var changedSameEvent = ActivityBatchJson(eventId, collectorInstanceId, sequence: 0, app: "chrome.exe", bucketStart, bucketEnd);
     using var conflict = await client.PostAsync("/api/v1/activity/batches", Json(changedSameEvent));
     Equal(HttpStatusCode.OK, conflict.StatusCode);
     using (var payload = System.Text.Json.JsonDocument.Parse(await conflict.Content.ReadAsStringAsync()))
@@ -262,7 +292,7 @@ static async Task AssertActivityIngestion(HttpClient client)
         Equal("event_checksum_conflict", payload.RootElement.GetProperty("outcomes")[0].GetProperty("rejection_reason").GetString() ?? "");
     }
 
-    var sequenceConflict = ActivityBatchJson(secondEventId, collectorInstanceId, sequence: 0, app: "word.exe");
+    var sequenceConflict = ActivityBatchJson(secondEventId, collectorInstanceId, sequence: 0, app: "word.exe", bucketStart, bucketEnd);
     using var sequenceConflictResponse = await client.PostAsync("/api/v1/activity/batches", Json(sequenceConflict));
     Equal(HttpStatusCode.OK, sequenceConflictResponse.StatusCode);
     using (var payload = System.Text.Json.JsonDocument.Parse(await sequenceConflictResponse.Content.ReadAsStringAsync()))
@@ -270,11 +300,22 @@ static async Task AssertActivityIngestion(HttpClient client)
         Equal("rejected", payload.RootElement.GetProperty("outcomes")[0].GetProperty("status").GetString() ?? "");
         Equal("sequence_conflict", payload.RootElement.GetProperty("outcomes")[0].GetProperty("rejection_reason").GetString() ?? "");
     }
+
+    client.DefaultRequestHeaders.Add(DevelopmentIdentity.PrincipalHeader, "demo-manager");
+    using var report = await client.GetAsync($"/api/v1/teams/team-synthetic/daily?date={reportDate}");
+    Equal(HttpStatusCode.OK, report.StatusCode);
+    using (var payload = System.Text.Json.JsonDocument.Parse(await report.Content.ReadAsStringAsync()))
+    {
+        True(!payload.RootElement.GetProperty("synthetic").GetBoolean(), "Ingested activity report must not be the static synthetic fixture.");
+        Equal("employee-live-test", payload.RootElement.GetProperty("employees")[0].GetProperty("employee_id").GetString() ?? "");
+        True(payload.RootElement.GetProperty("employees")[0].GetProperty("categories").GetProperty("active_seconds").GetInt32() >= 60, "Accepted activity was not aggregated into active seconds.");
+        Equal("source_not_connected", payload.RootElement.GetProperty("employees")[0].GetProperty("output").GetProperty("unavailable_reason").GetString() ?? "");
+    }
 }
 
 static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");
 
-static string ActivityBatchJson(string eventId, string collectorInstanceId, long sequence, string app)
+static string ActivityBatchJson(string eventId, string collectorInstanceId, long sequence, string app, DateTimeOffset bucketStart, DateTimeOffset bucketEnd)
 {
     return $$"""
     {
@@ -289,8 +330,8 @@ static string ActivityBatchJson(string eventId, string collectorInstanceId, long
           "session_id": "test-session",
           "collector_instance_id": "{{collectorInstanceId}}",
           "sequence": {{sequence}},
-          "bucket_start": "2026-09-13T09:00:00Z",
-          "bucket_end": "2026-09-13T09:01:00Z",
+          "bucket_start": "{{bucketStart:O}}",
+          "bucket_end": "{{bucketEnd:O}}",
           "coarsened": false,
           "slices": [
             {

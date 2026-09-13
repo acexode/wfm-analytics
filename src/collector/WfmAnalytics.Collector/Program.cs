@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 using WfmAnalytics.Collector;
@@ -40,6 +41,54 @@ if (args.Contains("--export-evidence-artifacts", StringComparer.Ordinal))
     var result = LiveEvidenceRunner.ExportArtifacts(queueRoot, outputDirectory);
     Console.WriteLine(JsonSerializer.Serialize(result, CollectorJson.Options));
     return 0;
+}
+
+if (args.Contains("--upload-evidence-queue", StringComparer.Ordinal))
+{
+    var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
+    var serverUrl = (ReadStringOption(args, "--server-url") ?? "http://127.0.0.1:5080").TrimEnd('/');
+    var enrollmentId = ReadStringOption(args, "--enrollment-id") ?? "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    var agentVersion = ReadStringOption(args, "--agent-version") ?? "0.1.0-live";
+    var policyVersion = ReadStringOption(args, "--policy-version") ?? "manual-live-test";
+
+    var key = WindowsDpapiKeyStore.LoadOrCreateKey(Path.Combine(queueRoot, LiveEvidenceRunner.ProtectedKeyFileName));
+    var queue = new FileBackedEncryptedQueue(queueRoot, new AesGcmPayloadProtector(key));
+    var pending = queue.ListPending().Take(200).ToArray();
+    if (pending.Length == 0)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new UploadResult(0, 0, 0, []), CollectorJson.Options));
+        return 0;
+    }
+
+    var envelopes = pending.Select(queue.Read).ToArray();
+    var batch = new CollectorBatch("1.0", Guid.NewGuid(), agentVersion, policyVersion, envelopes);
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    client.DefaultRequestHeaders.Add("X-WFM-Enrollment-Id", enrollmentId);
+    using var content = new StringContent(JsonSerializer.Serialize(batch, CollectorJson.Options), Encoding.UTF8, "application/json");
+    using var response = await client.PostAsync($"{serverUrl}/api/v1/activity/batches", content);
+    var responseText = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode)
+    {
+        Console.Error.WriteLine(responseText);
+        return 1;
+    }
+
+    var upload = JsonSerializer.Deserialize<UploadResponse>(responseText, CollectorJson.Options)
+        ?? throw new InvalidOperationException("Upload response could not be parsed.");
+    var pendingByEvent = pending.Zip(envelopes).ToDictionary(item => item.Second.EventId, item => item.First);
+    var acknowledged = 0;
+    foreach (var outcome in upload.Outcomes)
+    {
+        if ((outcome.Status is "accepted" or "already_accepted") && pendingByEvent.TryGetValue(outcome.EventId, out var item))
+        {
+            queue.Acknowledge(item);
+            acknowledged++;
+        }
+    }
+
+    var result = new UploadResult(pending.Length, upload.Outcomes.Count, acknowledged, upload.Outcomes);
+    Console.WriteLine(JsonSerializer.Serialize(result, CollectorJson.Options));
+    return acknowledged == pending.Length ? 0 : 1;
 }
 
 if (args.Contains("--sample-live", StringComparer.Ordinal))
@@ -136,6 +185,7 @@ Console.WriteLine("Use --evidence-live --duration-seconds 120 --out tmp/wp03-liv
 Console.WriteLine("Add --allow-window-titles, --allow-browser-urls, --allow-typed-text, --allow-screenshots, --allow-clipboard, or --allow-full-paths to test an expanded capture policy.");
 Console.WriteLine("Use --replay-evidence-queue --queue-root tmp/wp03-live-queue after a restart to verify queued payload replay.");
 Console.WriteLine("Use --export-evidence-artifacts --queue-root tmp/wp03-live-queue --out tmp/screenshots-review to decrypt screenshot artifacts for manual review.");
+Console.WriteLine("Use --upload-evidence-queue --queue-root tmp/wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd to send queued envelopes to the development API.");
 return 0;
 
 static int ReadIntOption(string[] args, string name, int defaultValue)
@@ -173,3 +223,19 @@ internal sealed record LiveSampleResult(
     [property: JsonPropertyName("ended_at")] DateTimeOffset EndedAt,
     [property: JsonPropertyName("sample_interval_ms")] int SampleIntervalMs,
     [property: JsonPropertyName("batch")] CollectorBatch Batch);
+
+internal sealed record UploadResult(
+    [property: JsonPropertyName("pending_count")] int PendingCount,
+    [property: JsonPropertyName("outcome_count")] int OutcomeCount,
+    [property: JsonPropertyName("acknowledged_count")] int AcknowledgedCount,
+    [property: JsonPropertyName("outcomes")] IReadOnlyList<UploadOutcome> Outcomes);
+
+internal sealed record UploadResponse(
+    [property: JsonPropertyName("schema_version")] string SchemaVersion,
+    [property: JsonPropertyName("batch_id")] Guid BatchId,
+    [property: JsonPropertyName("outcomes")] IReadOnlyList<UploadOutcome> Outcomes);
+
+internal sealed record UploadOutcome(
+    [property: JsonPropertyName("event_id")] Guid EventId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("rejection_reason")] string? RejectionReason);

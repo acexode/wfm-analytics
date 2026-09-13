@@ -5,24 +5,33 @@ using System.Text.Json.Serialization;
 using Npgsql;
 using NpgsqlTypes;
 using WfmAnalytics.Server.Database;
+using WfmAnalytics.Server.Modules.Analytics;
 
 namespace WfmAnalytics.Server.Modules.Ingestion;
 
 public static class ActivityIngestionEndpoints
 {
     private const string EnrollmentHeader = "X-WFM-Enrollment-Id";
+    private const int MaxBatchBytes = 512 * 1024;
     private static readonly TimeSpan ReceiptRetention = TimeSpan.FromDays(37);
+    private static readonly TimeSpan LateWindow = TimeSpan.FromDays(7);
+    private static readonly TimeSpan FutureWindow = TimeSpan.FromMinutes(5);
 
     public static IEndpointRouteBuilder MapActivityIngestionEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/v1/activity/batches", async (HttpRequest request, PostgresDatabase database, CancellationToken token) =>
+        endpoints.MapPost("/api/v1/activity/batches", async (HttpRequest request, PostgresDatabase database, ActivityDailyAggregator aggregator, CancellationToken token) =>
         {
             if (!Guid.TryParse(request.Headers[EnrollmentHeader], out var enrollmentId))
             {
                 return Results.BadRequest(new { code = "missing_or_invalid_enrollment" });
             }
 
-            using var body = await JsonDocument.ParseAsync(request.Body, cancellationToken: token);
+            using var body = await TryReadJsonBodyAsync(request, token);
+            if (body is null)
+            {
+                return Results.BadRequest(new { code = "invalid_json_or_oversized_batch" });
+            }
+
             var root = body.RootElement;
             if (!TryReadBatch(root, out var batchId, out var events, out var error))
             {
@@ -39,10 +48,40 @@ public static class ActivityIngestionEndpoints
             }
 
             await transaction.CommitAsync(token);
+            if (outcomes.Any(outcome => outcome.AcceptedNew))
+            {
+                await aggregator.ProcessDirtyDaysAsync(token);
+            }
+
             return Results.Ok(new ActivityBatchResponse("1.0", batchId, outcomes));
         }).AllowAnonymous();
 
         return endpoints;
+    }
+
+    private static async Task<JsonDocument?> TryReadJsonBodyAsync(HttpRequest request, CancellationToken token)
+    {
+        if (request.ContentLength is > MaxBatchBytes)
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var buffer = new MemoryStream();
+            await request.Body.CopyToAsync(buffer, token);
+            if (buffer.Length is 0 or > MaxBatchBytes)
+            {
+                return null;
+            }
+
+            buffer.Position = 0;
+            return await JsonDocument.ParseAsync(buffer, cancellationToken: token);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static bool TryReadBatch(JsonElement root, out Guid batchId, out ActivityEvent[] events, out string error)
@@ -53,6 +92,12 @@ public static class ActivityIngestionEndpoints
         if (!root.TryGetProperty("schema_version", out var schema) || schema.GetString() != "1.0")
         {
             error = "unsupported_schema_version";
+            return false;
+        }
+
+        if (!TryString(root, "agent_version", out _) || !TryString(root, "policy_version", out _))
+        {
+            error = "missing_batch_metadata";
             return false;
         }
 
@@ -108,9 +153,22 @@ public static class ActivityIngestionEndpoints
             return false;
         }
 
+        var now = DateTimeOffset.UtcNow;
         if (sequence < 0 || bucketEnd <= bucketStart || bucketEnd - bucketStart > TimeSpan.FromMinutes(1))
         {
             error = "invalid_event_time";
+            return false;
+        }
+
+        if (bucketEnd < now.Subtract(LateWindow))
+        {
+            error = "event_too_old";
+            return false;
+        }
+
+        if (bucketEnd > now.Add(FutureWindow))
+        {
+            error = "event_from_future";
             return false;
         }
 
@@ -118,6 +176,27 @@ public static class ActivityIngestionEndpoints
         {
             error = "invalid_slice_count";
             return false;
+        }
+
+        var bucketMilliseconds = (int)Math.Round((bucketEnd - bucketStart).TotalMilliseconds);
+        var previousEnd = 0;
+        foreach (var slice in slices.EnumerateArray())
+        {
+            if (!slice.TryGetProperty("start_offset_ms", out var startElement)
+                || !startElement.TryGetInt32(out var start)
+                || !slice.TryGetProperty("end_offset_ms", out var endElement)
+                || !endElement.TryGetInt32(out var end)
+                || !slice.TryGetProperty("state", out var stateElement)
+                || !IsAcceptedState(stateElement.GetString())
+                || start < previousEnd
+                || end <= start
+                || end > bucketMilliseconds)
+            {
+                error = "invalid_slice_bounds";
+                return false;
+            }
+
+            previousEnd = end;
         }
 
         var raw = element.GetRawText();
@@ -134,12 +213,12 @@ public static class ActivityIngestionEndpoints
             var checksum = await existing.ExecuteScalarAsync(token) as string;
             if (checksum == activityEvent.PayloadChecksum)
             {
-                return new ActivityOutcome(activityEvent.EventId, "already_accepted", null);
+                return new ActivityOutcome(activityEvent.EventId, "already_accepted", null, false);
             }
 
             if (checksum is not null)
             {
-                return new ActivityOutcome(activityEvent.EventId, "rejected", "event_checksum_conflict");
+                return new ActivityOutcome(activityEvent.EventId, "rejected", "event_checksum_conflict", false);
             }
         }
 
@@ -155,8 +234,8 @@ public static class ActivityIngestionEndpoints
                 var existingChecksum = reader.GetString(1);
                 await reader.CloseAsync();
                 return existingEventId == activityEvent.EventId && existingChecksum == activityEvent.PayloadChecksum
-                    ? new ActivityOutcome(activityEvent.EventId, "already_accepted", null)
-                    : new ActivityOutcome(activityEvent.EventId, "rejected", "sequence_conflict");
+                    ? new ActivityOutcome(activityEvent.EventId, "already_accepted", null, false)
+                    : new ActivityOutcome(activityEvent.EventId, "rejected", "sequence_conflict", false);
             }
         }
 
@@ -187,7 +266,23 @@ public static class ActivityIngestionEndpoints
             await insert.ExecuteNonQueryAsync(token);
         }
 
-        return new ActivityOutcome(activityEvent.EventId, "accepted", null);
+        await using (var dirty = new NpgsqlCommand("""
+            INSERT INTO ingestion.activity_dirty_days(enrollment_id,report_date,dirty_generation,last_event_end,updated_at)
+            SELECT $1, $2, 1, $3, CURRENT_TIMESTAMP
+            WHERE EXISTS (SELECT 1 FROM platform.development_enrollments WHERE enrollment_id=$1)
+            ON CONFLICT (enrollment_id,report_date) DO UPDATE
+            SET dirty_generation=ingestion.activity_dirty_days.dirty_generation + 1,
+                last_event_end=GREATEST(ingestion.activity_dirty_days.last_event_end, EXCLUDED.last_event_end),
+                updated_at=CURRENT_TIMESTAMP
+            """, connection, transaction))
+        {
+            dirty.Parameters.AddWithValue(enrollmentId);
+            dirty.Parameters.AddWithValue(DateOnly.FromDateTime(activityEvent.BucketStart.UtcDateTime.Date));
+            dirty.Parameters.AddWithValue(activityEvent.BucketEnd);
+            await dirty.ExecuteNonQueryAsync(token);
+        }
+
+        return new ActivityOutcome(activityEvent.EventId, "accepted", null, true);
     }
 
     private static bool TryGuid(JsonElement element, string property, out Guid value)
@@ -219,6 +314,8 @@ public static class ActivityIngestionEndpoints
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     }
 
+    private static bool IsAcceptedState(string? value) => value is "active" or "inactive" or "locked" or "detail_unavailable";
+
     private readonly record struct ActivityEvent(Guid EventId, string BootId, string SessionId, Guid CollectorInstanceId, long Sequence, DateTimeOffset BucketStart, DateTimeOffset BucketEnd, bool Coarsened, string RawJson, string PayloadChecksum);
     private sealed record ActivityBatchResponse(
         [property: JsonPropertyName("schema_version")] string SchemaVersion,
@@ -228,5 +325,6 @@ public static class ActivityIngestionEndpoints
     private sealed record ActivityOutcome(
         [property: JsonPropertyName("event_id")] Guid EventId,
         [property: JsonPropertyName("status")] string Status,
-        [property: JsonPropertyName("rejection_reason")] string? RejectionReason);
+        [property: JsonPropertyName("rejection_reason")] string? RejectionReason,
+        [property: JsonIgnore] bool AcceptedNew);
 }
