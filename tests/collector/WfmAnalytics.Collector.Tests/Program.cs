@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("partial buckets stop at last healthy sample", PartialBucketsStopAtLastHealthySample),
     ("encrypted queue replays exact envelope without plaintext leak", EncryptedQueueReplay),
     ("DPAPI queue key survives process-style reload on Windows", DpapiQueueKeySurvivesReload),
+    ("sensitive fields are dropped unless policy enables them", SensitiveFieldsRequirePolicy),
     ("collector batch JSON uses accepted snake_case contract names", CollectorBatchJsonUsesContractNames),
 };
 
@@ -137,6 +138,41 @@ static void CollectorBatchJsonUsesContractNames()
     True(json.Contains("\"event_id\"", StringComparison.Ordinal), "Envelope event_id was not snake_case.");
     True(json.Contains("\"start_offset_ms\"", StringComparison.Ordinal), "Slice start_offset_ms was not snake_case.");
     True(json.Contains("\"state\":\"active\"", StringComparison.Ordinal), "Activity state did not use contract spelling.");
+}
+
+static void SensitiveFieldsRequirePolicy()
+{
+    var sensitive = new SensitiveObservation(
+        WindowTitle: "Customer File - Jane Doe",
+        BrowserUrl: "https://example.invalid/private",
+        TypedText: "secret typed text",
+        ScreenshotRef: "screenshot-1",
+        ClipboardText: "clipboard secret",
+        FullPath: @"C:\Users\Example\Sensitive\tool.exe");
+
+    var minimum = new BucketAccumulator("boot", "session", Guid.NewGuid(), TimeSpan.FromMinutes(5), CollectionPolicy.Minimum("minimum"));
+    minimum.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:00Z"), TimeSpan.Zero, "tool.exe", false, TimeSpan.Zero, sensitive));
+    var minimumEnvelope = minimum.CompletePartial(DateTimeOffset.Parse("2026-09-13T09:00:10Z")) ?? throw new InvalidOperationException("Missing envelope.");
+    Equal(null, minimumEnvelope.Slices.Single().Sensitive);
+
+    var expandedPolicy = new CollectionPolicy("expanded", new SensitiveCaptureSettings(WindowTitles: true, BrowserUrls: false, TypedText: false, Screenshots: false, Clipboard: false, FullPaths: true));
+    var expanded = new BucketAccumulator("boot", "session", Guid.NewGuid(), TimeSpan.FromMinutes(5), expandedPolicy);
+    expanded.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:00Z"), TimeSpan.Zero, "tool.exe", false, TimeSpan.Zero, sensitive));
+    var expandedEnvelope = expanded.CompletePartial(DateTimeOffset.Parse("2026-09-13T09:00:10Z")) ?? throw new InvalidOperationException("Missing envelope.");
+    Equal("Customer File - Jane Doe", expandedEnvelope.Slices.Single().Sensitive?.WindowTitle ?? "");
+    Equal(@"C:\Users\Example\Sensitive\tool.exe", expandedEnvelope.Slices.Single().Sensitive?.FullPath ?? "");
+    Equal(null, expandedEnvelope.Slices.Single().Sensitive?.BrowserUrl);
+    Equal(null, expandedEnvelope.Slices.Single().Sensitive?.TypedText);
+    Equal(null, expandedEnvelope.Slices.Single().Sensitive?.ClipboardText);
+
+    var clipboardScreenshotPolicy = new CollectionPolicy("expanded-assets", new SensitiveCaptureSettings(WindowTitles: false, BrowserUrls: false, TypedText: false, Screenshots: true, Clipboard: true, FullPaths: false));
+    var clipboardScreenshot = new BucketAccumulator("boot", "session", Guid.NewGuid(), TimeSpan.FromMinutes(5), clipboardScreenshotPolicy);
+    clipboardScreenshot.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:00Z"), TimeSpan.Zero, "tool.exe", false, TimeSpan.Zero, sensitive));
+    var clipboardScreenshotEnvelope = clipboardScreenshot.CompletePartial(DateTimeOffset.Parse("2026-09-13T09:00:10Z")) ?? throw new InvalidOperationException("Missing envelope.");
+    Equal("screenshot-1", clipboardScreenshotEnvelope.Slices.Single().Sensitive?.ScreenshotRef ?? "");
+    Equal("clipboard secret", clipboardScreenshotEnvelope.Slices.Single().Sensitive?.ClipboardText ?? "");
+    Equal(null, clipboardScreenshotEnvelope.Slices.Single().Sensitive?.WindowTitle);
+    Equal(null, clipboardScreenshotEnvelope.Slices.Single().Sensitive?.FullPath);
 }
 
 static void DpapiQueueKeySurvivesReload()

@@ -15,7 +15,8 @@ public sealed record CollectorObservation(
     TimeSpan MonotonicElapsed,
     string? ApplicationId,
     bool IsLocked,
-    TimeSpan TimeSinceLastInput);
+    TimeSpan TimeSinceLastInput,
+    SensitiveObservation? Sensitive = null);
 
 public sealed record ActivitySlice(
     [property: JsonPropertyName("start_offset_ms")]
@@ -25,7 +26,9 @@ public sealed record ActivitySlice(
     [property: JsonPropertyName("application_id")]
     string? ApplicationId,
     [property: JsonPropertyName("state")]
-    ActivityState State);
+    ActivityState State,
+    [property: JsonPropertyName("sensitive")]
+    SensitiveObservation? Sensitive = null);
 
 public sealed record ActivityEnvelope(
     [property: JsonPropertyName("event_id")]

@@ -9,7 +9,8 @@ if (args.Contains("--evidence-live", StringComparer.Ordinal))
     var interval = ReadIntOption(args, "--interval-ms", 1000);
     var outputPath = ReadStringOption(args, "--out") ?? Path.Combine("tmp", "wp03-live-evidence.json");
     var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
-    var report = await LiveEvidenceRunner.RunAsync(new LiveEvidenceOptions(duration, interval, outputPath, queueRoot));
+    var policy = ReadPolicy(args);
+    var report = await LiveEvidenceRunner.RunAsync(new LiveEvidenceOptions(duration, interval, outputPath, queueRoot, policy));
     Console.WriteLine($"Wrote WP03 live evidence to {outputPath}");
     Console.WriteLine(JsonSerializer.Serialize(new
     {
@@ -123,6 +124,7 @@ if (args.Contains("--self-test", StringComparer.Ordinal))
 Console.WriteLine("WFM collector prototype. Use --self-test for a local encrypted queue smoke test.");
 Console.WriteLine("Use --sample-live --duration-seconds 30 --out tmp/live-sample.json to capture foreground app slices.");
 Console.WriteLine("Use --evidence-live --duration-seconds 120 --out tmp/wp03-live-evidence.json for the guided WP03 evidence report.");
+Console.WriteLine("Add --allow-window-titles, --allow-browser-urls, --allow-typed-text, --allow-screenshots, --allow-clipboard, or --allow-full-paths to test an expanded capture policy.");
 Console.WriteLine("Use --replay-evidence-queue --queue-root tmp/wp03-live-queue after a restart to verify queued payload replay.");
 return 0;
 
@@ -141,6 +143,19 @@ static string? ReadStringOption(string[] args, string name)
 {
     var index = Array.FindIndex(args, value => string.Equals(value, name, StringComparison.Ordinal));
     return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+}
+
+static CollectionPolicy ReadPolicy(string[] args)
+{
+    var settings = new SensitiveCaptureSettings(
+        WindowTitles: args.Contains("--allow-window-titles", StringComparer.Ordinal),
+        BrowserUrls: args.Contains("--allow-browser-urls", StringComparer.Ordinal),
+        TypedText: args.Contains("--allow-typed-text", StringComparer.Ordinal),
+        Screenshots: args.Contains("--allow-screenshots", StringComparer.Ordinal),
+        Clipboard: args.Contains("--allow-clipboard", StringComparer.Ordinal),
+        FullPaths: args.Contains("--allow-full-paths", StringComparer.Ordinal));
+
+    return new CollectionPolicy(settings.AnyEnabled ? "manual-expanded-sensitive-test" : "manual-live-test", settings);
 }
 
 internal sealed record LiveSampleResult(

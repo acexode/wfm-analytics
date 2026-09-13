@@ -26,6 +26,7 @@ WP01 is accepted. WP02 is accepted as the development foundation. G0 remains par
 - D12 Eight to twelve active engineering weeks is an initial planning range only. Accepted with low confidence until G1; it is not a delivery commitment.
 - D13 First executable slice uses only synthetic data in an isolated local PostgreSQL cluster. Accepted. Development identity is fixed server-side and disabled outside Development; production identity remains a WP05 dependency.
 - D14 The daily dashboard exposes freshness, coverage, unknown, conflict, and unavailable output before any productivity interpretation. Accepted. The browser consumes the real API contract rather than a bundled UI mock.
+- D15 Expanded sensitive capture is policy-gated and default-off. Accepted as a scope change requested by the user on 13 September 2026. Window titles, browser URLs, typed text, screenshots, clipboard text, and full paths may be captured only when an explicit collection policy enables the exact field for an authorized scope with documented purpose, employee notice, retention, encryption, access audit, and company approval. Minimum collection remains the default, and audio, webcam capture, mouse trails, covert collection, and runtime employee AI scores remain prohibited.
 
 ## Dependencies and when they matter
 

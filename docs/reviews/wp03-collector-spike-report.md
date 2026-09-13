@@ -22,11 +22,14 @@ WP03 Windows feasibility. Owner: endpoint role. Reviewer still required: platfor
 - State accumulation is deterministic and uses 60-second UTC buckets, ordered nonoverlapping slices, lock precedence, five-minute idle boundary semantics, normalized executable basenames only, collector instance ID, sequence, and event ID.
 - The local queue spike uses AES-256-GCM encrypted payload files, a Windows DPAPI-protected current-user queue key, and minimal content-free manifest metadata so durability and replay can be tested without adding a new package dependency. The accepted baseline still calls for SQLite storage before pilot hardening; that remains pending.
 - The Windows probe calls `GetLastInputInfo`, foreground-window process lookup, process session ID lookup, and a conservative interactive-desktop lock heuristic only on Windows. This is scaffolding for controlled-device evidence, not a full certification of Windows behavior.
+- The expanded sensitive capture policy has been introduced as a default-off setting. The current spike can include window titles, full executable paths, clipboard text, and desktop screenshots only when the evidence command explicitly enables those settings; browser URLs and typed text are represented in policy but not implemented as raw capture paths yet.
 
 ## Acceptance evidence produced
 
 - Added collector tests for application identifier normalization, idle threshold boundary behavior, lock precedence, ordered/capped slices, partial-bucket truncation at the last healthy sample, encrypted replay without plaintext application leakage, and JSON contract naming.
 - Added a live evidence command that captures foreground app slices, resource samples, sample gaps, encrypted queue replay, and ciphertext plaintext inspection into one JSON report.
+- Added policy switches for expanded sensitive capture and tests proving sensitive fields are dropped under the default minimum policy.
+- Added policy-gated clipboard text capture and BMP screenshot capture for physical Windows evidence runs.
 - Added a separate queue replay command for process-restart-style verification under the same Windows user.
 - Added collector project to the existing solution and added the collector test project to `tools/verify.sh`.
 - Added a repository-local `NuGet.Config` and local environment defaults so .NET validation can run without reading protected user-profile NuGet config.
@@ -40,6 +43,9 @@ WP03 Windows feasibility. Owner: endpoint role. Reviewer still required: platfor
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --self-test`: passed; produced a replayed encrypted queue envelope summary.
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 6 --interval-ms 1000 --out tmp\wp03-smoke-evidence.json --queue-root tmp\wp03-smoke-queue-dpapi`: passed; wrote one smoke evidence event, six resource samples, one encrypted payload, and no plaintext leak.
 - `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --replay-evidence-queue --queue-root tmp\wp03-smoke-queue-dpapi`: passed; replayed one encrypted payload with matching identity and `windows-dpapi-current-user` key protection.
+- `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 5 --interval-ms 1000 --out tmp\wp03-expanded-smoke-evidence.json --queue-root tmp\wp03-expanded-smoke-queue --allow-window-titles --allow-full-paths`: passed; wrote an expanded-policy smoke report, one encrypted payload, and no plaintext leak.
+- `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --replay-evidence-queue --queue-root tmp\wp03-expanded-smoke-queue`: passed; replayed one expanded-policy encrypted payload with matching identity and `windows-dpapi-current-user` key protection.
+- `dotnet run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 3 --interval-ms 1000 --out tmp\wp03-screenshot-clipboard-smoke.json --queue-root tmp\wp03-screenshot-clipboard-queue --allow-screenshots --allow-clipboard`: passed; clipboard text was captured in the evidence JSON on this host, while screenshot capture produced no file from the Codex background execution context.
 - User manually tested live foreground app switching with real applications and reported the behavior verified.
 
 ## Checks not run
@@ -54,7 +60,9 @@ WP03 Windows feasibility. Owner: endpoint role. Reviewer still required: platfor
 
 - P1: WP03 cannot be accepted until a controlled Windows test device runs the collector harness and records the required state-transition, replay, plaintext-inspection, and resource evidence.
 - P2: Replace or extend the file-backed queue with the baseline SQLite queue before pilot hardening.
-- P2: The Windows probe now covers last-input timing, foreground process basename, process session ID, boot ID approximation, and conservative lock inference. Lock/unlock, sleep/resume boundaries, fast-user switching, RDP/VDI modes, and endpoint-security behavior still need controlled-device tests.
+- P2: The Windows probe now covers last-input timing, foreground process basename, policy-gated window titles and full paths, process session ID, boot ID approximation, and conservative lock inference. Lock/unlock, sleep/resume boundaries, fast-user switching, RDP/VDI modes, and endpoint-security behavior still need controlled-device tests.
+- P1: Browser URL and typed text capture switches exist in policy but raw capture implementations are not yet built. These require separate security review before employee deployment.
+- P2: Screenshot capture uses Windows desktop capture APIs and must be verified from the user's physical interactive desktop; the Codex background execution context did not expose a capturable desktop in the smoke run.
 
 ## Recommended next step
 

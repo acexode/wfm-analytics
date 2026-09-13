@@ -77,7 +77,7 @@ P0 requirements must pass before the employee pilot:
 
 - R01: company identity integration, scoped roles, employee and device enrollment, revocation, and effective-dated team and client assignment.
 - R02: validated roster and schedule CSV imports, including overnight shifts, timezone handling, breaks, and rejected-row reports.
-- R03: visible Windows session collector for process identity, coarse active or inactive state, lock state, and collection health, with encrypted local buffering.
+- R03: visible Windows session collector for process identity, coarse active or inactive state, lock state, and collection health, with encrypted local buffering. The default policy remains minimum collection; an explicitly approved expanded-capture policy may enable additional sensitive evidence fields for authorized scopes.
 - R04: retry-safe ingestion, durable acknowledgment, clear missing-data indicators, and reproducible versioned aggregation.
 - R05: daily team overview and employee timeline with drill-down, metric definitions, coverage, and freshness.
 - R06: one agreed operational-output import mapping, supporting completed work and quality where the source contains them. Without it, the pilot is explicitly an activity-visibility pilot and cannot pass the output-linkage business gate.
@@ -86,7 +86,7 @@ P0 requirements must pass before the employee pilot:
 - R09: authorization-safe CSV export with formula-injection protection, report revision, filters, and metric definitions.
 - R10: collection notice, retention configuration, access audit, device health, backup restore, and staged update and rollback procedures.
 
-Deferred scope includes macOS, browser extensions and URL inspection, live CRM or telephony connectors, automated forecasting, staffing optimization, client billing, payroll, multi-company SaaS, screenshots, keystroke content or counts, clipboard capture, AI-generated employee scores, attrition prediction, and generative coaching. New scope must replace or defer existing work unless the lead explicitly revises capacity and cost assumptions.
+Deferred scope includes macOS, browser extensions and URL inspection, live CRM or telephony connectors, automated forecasting, staffing optimization, client billing, payroll, multi-company SaaS, AI-generated employee scores, attrition prediction, and generative coaching. Screenshots, window titles, URLs, typed text, clipboard contents, and full paths are no longer categorically deferred, but they remain prohibited unless an approved expanded-capture policy explicitly enables the exact field, scope, retention, visibility, and access controls. New scope must replace or defer existing work unless the lead explicitly revises capacity and cost assumptions.
 
 ## 7 Metric contract
 
@@ -122,14 +122,14 @@ These targets are proposed release gates and must be measured, not assumed:
 - Usability: a team leader can identify a data gap, compare an imported output measure, and resolve an exception without developer assistance in a scripted pilot session.
 - Endpoint resource budget: provisional p95 collector CPU below 1 percent over sampled one-minute windows and resident memory below 150 MB on the nominated minimum-spec Windows machine during an eight-hour script. Collect baseline and added load, startup behavior, and VPN and endpoint-security effects. Revise targets only with measured evidence.
 - Performance: p95 daily-team and 30-day aggregate views below two seconds at 20 simultaneous dashboard sessions and the 1,000-agent synthetic workload on a documented test host. Large exports run as bounded jobs.
-- Security: tests deny access across team and client scopes, including exports and revoked users or devices. Sensitive screen text must be absent from payloads, local queues, logs, and backups.
+- Security: tests deny access across team and client scopes, including exports and revoked users or devices. Under the default minimum policy, sensitive screen text must be absent from payloads, local queues, logs, and backups. Under an approved expanded-capture policy, sensitive fields must be encrypted locally, labeled by policy version, access-controlled separately from ordinary activity summaries, audited on read, and covered by shorter retention and explicit employee notice.
 - Recovery: demonstrate database restoration within four hours and no more than 24 hours of acknowledged-data loss with the initial daily-backup design. If the company needs tighter recovery, add and cost a tested continuous-archive design before rollout.
 
 ## 9 Collection and trust policy
 
-Collect the minimum required to explain coarse workstation state: pseudonymous employee and device IDs, approved process identifiers, coarse state durations, sequence and version fields, and health diagnostics. Resolve employee names on the server only for authorized viewers.
+Collect the minimum required to explain coarse workstation state by default: pseudonymous employee and device IDs, approved process identifiers, coarse state durations, sequence and version fields, and health diagnostics. Resolve employee names on the server only for authorized viewers.
 
-Do not collect window titles, URLs, document names, typed characters, keystroke counts, screenshots, audio, clipboard contents, or mouse trails. No per-keystroke hooks are required for the first release. An idle threshold of five minutes is a configurable pilot default; changing it creates a new policy version. The exact threshold boundary semantics are defined in the technical plan.
+Expanded sensitive capture is a policy-controlled exception, not the default. The policy has independent switches for window titles, browser URLs, typed text, screenshots, clipboard text, and full executable or document paths. Each switch is off by default and must be enabled explicitly for a named scope, purpose, retention period, employee notice, and approval record. Audio, webcam capture, mouse trails, covert collection, and runtime employee AI scores remain prohibited. No per-keystroke hook may be enabled for employee deployment without a separate legal and security review. An idle threshold of five minutes is a configurable pilot default; changing it creates a new policy version. The exact threshold boundary semantics are defined in the technical plan.
 
 Collection follows a company-managed work session and visible policy. Outside an explicit collection window the agent stops activity capture and reports only non-content health as authorized. A missing schedule does not silently enable all-day tracking. Device enrollment initially receives a test collection window; production windows derive from approved schedules and an explicit grace period, default zero. Expired offline policy stops collection and records a gap.
 

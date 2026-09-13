@@ -20,6 +20,14 @@ New-Item -ItemType Directory -Force tmp
 & 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 180 --interval-ms 1000 --out tmp\wp03-live-evidence.json --queue-root tmp\wp03-live-queue
 ```
 
+For an expanded sensitive-capture evidence run, add only the switches that are approved for the test:
+
+```powershell
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --evidence-live --duration-seconds 180 --interval-ms 1000 --out tmp\wp03-expanded-evidence.json --queue-root tmp\wp03-expanded-queue --allow-window-titles --allow-full-paths --allow-screenshots --allow-clipboard
+```
+
+The policy also accepts `--allow-browser-urls` and `--allow-typed-text`; those switches record the policy intent, but raw capture for those two fields is not implemented in this spike.
+
 During the 180-second run:
 
 1. Focus Microsoft Teams for about 20 seconds.
@@ -33,6 +41,8 @@ Inspect the collected slices:
 ```powershell
 $report = Get-Content tmp\wp03-live-evidence.json | ConvertFrom-Json
 $report.batch.events | ForEach-Object { $_.slices } | Select-Object start_offset_ms,end_offset_ms,application_id,state
+$report.batch.events | ForEach-Object { $_.slices } | Select-Object start_offset_ms,end_offset_ms,@{Name='screenshot';Expression={$_.sensitive.screenshot_ref}},@{Name='clipboard_chars';Expression={ if ($_.sensitive.clipboard_text) { $_.sensitive.clipboard_text.Length } else { 0 } }}
+Get-ChildItem tmp\wp03-expanded-queue\screenshots
 $report.queue
 $report.resources | Select-Object -First 5
 $report.sample_gaps
@@ -47,7 +57,10 @@ Verify restart-style replay from a separate collector process:
 Expected evidence:
 
 - focused applications appear as executable basenames such as `teams.exe`, `ms-teams.exe`, `chrome.exe`, or `notepad.exe`;
-- no window titles, URLs, text, screenshots, clipboard data, or full paths appear in the report;
+- under the minimum policy, no window titles, URLs, text, screenshots, clipboard data, or full paths appear in the report;
+- under an expanded policy, only the explicitly enabled and implemented fields appear;
+- screenshot files appear as BMP files under `tmp\wp03-expanded-queue\screenshots` and their absolute paths appear in `sensitive.screenshot_ref`;
+- clipboard text appears in `sensitive.clipboard_text` only when `--allow-clipboard` is enabled and text clipboard content is available;
 - `queue.key_protection` is `windows-dpapi-current-user`;
 - encrypted payload count equals replayed payload count;
 - `replay_identity_matches` is `true`;

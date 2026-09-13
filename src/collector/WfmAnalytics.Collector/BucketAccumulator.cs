@@ -14,14 +14,17 @@ public sealed class BucketAccumulator
     private DateTimeOffset? _bucketStart;
     private ActivityState? _currentState;
     private string? _currentApplicationId;
+    private SensitiveObservation? _currentSensitive;
     private int _currentStartOffsetMs;
     private bool _detailUnavailable;
+    private readonly CollectionPolicy _policy;
 
     public BucketAccumulator(
         string bootId,
         string sessionId,
         Guid collectorInstanceId,
         TimeSpan idleThreshold,
+        CollectionPolicy? policy = null,
         long initialSequence = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bootId);
@@ -31,6 +34,7 @@ public sealed class BucketAccumulator
         _sessionId = sessionId;
         _collectorInstanceId = collectorInstanceId;
         _idleThreshold = idleThreshold;
+        _policy = policy ?? CollectionPolicy.Minimum("minimum-default");
         _nextSequence = initialSequence;
     }
 
@@ -100,6 +104,7 @@ public sealed class BucketAccumulator
         _slices.Clear();
         _currentState = null;
         _currentApplicationId = null;
+        _currentSensitive = null;
         _currentStartOffsetMs = 0;
         _detailUnavailable = false;
     }
@@ -110,6 +115,7 @@ public sealed class BucketAccumulator
         var applicationId = state == ActivityState.Active
             ? ApplicationIdNormalizer.NormalizeExecutableName(observation.ApplicationId)
             : null;
+        var sensitive = observation.Sensitive?.ApplyPolicy(_policy.SensitiveCapture);
 
         if (_detailUnavailable)
         {
@@ -120,11 +126,14 @@ public sealed class BucketAccumulator
         {
             _currentState = state;
             _currentApplicationId = applicationId;
+            _currentSensitive = sensitive;
             _currentStartOffsetMs = offsetMs;
             return;
         }
 
-        if (_currentState == state && string.Equals(_currentApplicationId, applicationId, StringComparison.Ordinal))
+        if (_currentState == state
+            && string.Equals(_currentApplicationId, applicationId, StringComparison.Ordinal)
+            && Equals(_currentSensitive, sensitive))
         {
             return;
         }
@@ -136,6 +145,7 @@ public sealed class BucketAccumulator
 
         _currentState = state;
         _currentApplicationId = applicationId;
+        _currentSensitive = sensitive;
         _currentStartOffsetMs = offsetMs;
     }
 
@@ -156,7 +166,8 @@ public sealed class BucketAccumulator
             return;
         }
 
-        _slices.Add(new ActivitySlice(startOffsetMs, endOffsetMs, applicationId, state));
+        var sensitive = _policy.SensitiveCapture.AnyEnabled ? _currentSensitive : null;
+        _slices.Add(new ActivitySlice(startOffsetMs, endOffsetMs, applicationId, state, sensitive));
     }
 
     private ActivityEnvelope CompleteBucket()
@@ -191,6 +202,7 @@ public sealed class BucketAccumulator
         _slices.Clear();
         _currentState = null;
         _currentApplicationId = null;
+        _currentSensitive = null;
         _currentStartOffsetMs = 0;
         _detailUnavailable = false;
         return envelope;

@@ -10,7 +10,8 @@ public sealed record LiveEvidenceOptions(
     int DurationSeconds,
     int IntervalMs,
     string OutputPath,
-    string QueueRoot);
+    string QueueRoot,
+    CollectionPolicy? Policy = null);
 
 public sealed record LiveEvidenceReport(
     [property: JsonPropertyName("started_at")] DateTimeOffset StartedAt,
@@ -19,6 +20,7 @@ public sealed record LiveEvidenceReport(
     [property: JsonPropertyName("boot_id")] string BootId,
     [property: JsonPropertyName("session_id")] string SessionId,
     [property: JsonPropertyName("collector_instance_id")] Guid CollectorInstanceId,
+    [property: JsonPropertyName("policy")] CollectionPolicy Policy,
     [property: JsonPropertyName("batch")] CollectorBatch Batch,
     [property: JsonPropertyName("queue")] QueueEvidence Queue,
     [property: JsonPropertyName("resources")] IReadOnlyList<ResourceSample> Resources,
@@ -66,11 +68,13 @@ public static class LiveEvidenceRunner
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".");
         Directory.CreateDirectory(options.QueueRoot);
+        var screenshotDirectory = Path.Combine(options.QueueRoot, "screenshots");
 
         var bootId = CollectorRuntimeIdentity.CreateBootId();
         var sessionId = CollectorRuntimeIdentity.CreateSessionId();
         var collectorInstanceId = Guid.NewGuid();
-        var collector = new BucketAccumulator(bootId, sessionId, collectorInstanceId, TimeSpan.FromMinutes(5));
+        var policy = options.Policy ?? CollectionPolicy.Minimum("manual-live-test");
+        var collector = new BucketAccumulator(bootId, sessionId, collectorInstanceId, TimeSpan.FromMinutes(5), policy);
         var completed = new List<ActivityEnvelope>();
         var resources = new List<ResourceSample>();
         var gaps = new List<SampleGap>();
@@ -90,7 +94,19 @@ public static class LiveEvidenceRunner
             }
 
             previousSampleAt = now;
-            var envelope = collector.Observe(WindowsProbe.Observe(now, stopwatch.Elapsed));
+            var observation = WindowsProbe.Observe(now, stopwatch.Elapsed, policy);
+            if (policy.SensitiveCapture.Clipboard || policy.SensitiveCapture.Screenshots)
+            {
+                observation = observation with
+                {
+                    Sensitive = MergeSensitiveObservation(
+                        observation.Sensitive,
+                        policy.SensitiveCapture.Clipboard ? WindowsClipboardReader.TryReadText() : null,
+                        policy.SensitiveCapture.Screenshots ? WindowsScreenshotCapture.TryCaptureDesktopBmp(screenshotDirectory, now) : null)
+                };
+            }
+
+            var envelope = collector.Observe(observation);
             if (envelope is not null)
             {
                 completed.Add(envelope);
@@ -107,18 +123,33 @@ public static class LiveEvidenceRunner
             completed.Add(partial);
         }
 
-        var batch = new CollectorBatch("1.0", Guid.NewGuid(), "0.1.0-live-evidence", "manual-live-test", completed);
+        var batch = new CollectorBatch("1.0", Guid.NewGuid(), "0.1.0-live-evidence", policy.PolicyVersion, completed);
         var queue = WriteAndInspectQueue(options.QueueRoot, completed);
         var notes = new[]
         {
             "Manual live evidence only. This report supports WP03 but does not authorize employee deployment.",
-            "Foreground process names are executable basenames only; window titles, URLs, text, screenshots, clipboard and full paths are not collected.",
+            policy.SensitiveCapture.AnyEnabled
+                ? "Expanded sensitive capture policy is enabled for this manual evidence run. Treat the report and queue as sensitive data."
+                : "Minimum capture policy is enabled; window titles, URLs, text, screenshots, clipboard and full paths are not collected.",
+            policy.SensitiveCapture.Screenshots
+                ? $"Screenshots are saved as BMP files under {Path.GetFullPath(screenshotDirectory)} and referenced from slice sensitive.screenshot_ref."
+                : "Screenshot capture is disabled.",
             "Lock detection uses interactive desktop accessibility and must be confirmed on the controlled company Windows device."
         };
 
-        var report = new LiveEvidenceReport(started, DateTimeOffset.UtcNow, options.IntervalMs, bootId, sessionId, collectorInstanceId, batch, queue, resources, gaps, notes);
+        var report = new LiveEvidenceReport(started, DateTimeOffset.UtcNow, options.IntervalMs, bootId, sessionId, collectorInstanceId, policy, batch, queue, resources, gaps, notes);
         await File.WriteAllTextAsync(options.OutputPath, JsonSerializer.Serialize(report, CollectorJson.Options), cancellationToken);
         return report;
+    }
+
+    private static SensitiveObservation MergeSensitiveObservation(SensitiveObservation? current, string? clipboardText, string? screenshotRef)
+    {
+        current ??= SensitiveObservation.Empty;
+        return current with
+        {
+            ClipboardText = clipboardText ?? current.ClipboardText,
+            ScreenshotRef = screenshotRef ?? current.ScreenshotRef
+        };
     }
 
     public static QueueEvidence ReplayQueue(string queueRoot)
