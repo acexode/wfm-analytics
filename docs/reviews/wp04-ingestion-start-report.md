@@ -23,6 +23,7 @@ WP04 durable ingestion and aggregation. This report covers the first development
 
 - Added PostgreSQL tables for `ingestion.ingestion_receipts` and `ingestion.activity_envelopes`.
 - Added `POST /api/v1/activity/batches`.
+- Added `POST /api/v1/device/health` and `ingestion.device_health_reports` so endpoints can upload queue, loss-manifest, session-state, warning, and tamper-resistance health payloads.
 - Added 512 KB request limit, 200-event batch limit, required batch metadata, seven-day late window, five-minute future clock-skew rejection, and slice ordering/bounds validation.
 - Added per-event outcomes: `accepted`, `already_accepted`, and `rejected`.
 - Added checksum conflict rejection for changed replay of the same event ID.
@@ -33,12 +34,14 @@ WP04 durable ingestion and aggregation. This report covers the first development
 - Added a conservative activity daily recompute path that preserves unknown gaps and keeps completed output unavailable.
 - Added activity daily report storage and made `GET /api/v1/teams/{teamId}/daily` prefer activity-backed reports over the static synthetic fixture for the same team/date.
 - Added collector `--upload-evidence-queue` to POST encrypted queued envelopes and acknowledge only `accepted` or `already_accepted` outcomes.
+- Added collector `--upload-collector-health` to POST local health to the development API.
 - Updated dashboard copy so it distinguishes static synthetic data from live development evidence.
 
 ## Checks actually run
 
 - `dotnet build src/server/WfmAnalytics.Server.slnx --no-restore`: passed.
-- `dotnet run --no-build --project tests/server/WfmAnalytics.Server.Tests` with `WFM_TEST_DATABASE` pointed at an isolated project-local PostgreSQL database on `127.0.0.1:55432`: passed, including migration idempotence, readiness, daily report authorization, malformed JSON, unsupported schema, oversized body, future event rejection, old event rejection, first ingestion accept, duplicate replay, changed-checksum rejection, collector-sequence conflict rejection, aggregation, and daily report retrieval.
+- `dotnet build src/server/WfmAnalytics.Server/WfmAnalytics.Server.csproj --no-restore -p:OutputPath=C:\dev\freelance\wfm-analytics\tmp\server-phase2-build\`: passed. The normal Debug output was locked by a running local API process.
+- `dotnet run --no-build --project tests/server/WfmAnalytics.Server.Tests` with `WFM_TEST_DATABASE` pointed at an isolated project-local PostgreSQL database on `127.0.0.1:55432`: passed, including migration idempotence, readiness, daily report authorization, malformed JSON, unsupported schema, oversized body, future event rejection, old event rejection, first ingestion accept, duplicate replay, changed-checksum rejection, collector-sequence conflict rejection, aggregation, daily report retrieval, and device health ingestion.
 - `dotnet run --no-build --project tests/collector/WfmAnalytics.Collector.Tests`: passed ten collector test groups.
 - `node --experimental-strip-types --test ../../tests/web/*.test.ts` from `src/web` using the bundled Node runtime: passed four web report parser tests.
 - `pnpm install` and `pnpm run build` from `src/web` using the bundled PNPM runtime: passed production TypeScript/Vite build.
@@ -53,6 +56,7 @@ WP04 durable ingestion and aggregation. This report covers the first development
 ## Open findings
 
 - P1: The ingestion endpoint currently uses a development `X-WFM-Enrollment-Id` header. Production device credential validation and enrollment binding remain required before employee deployment.
+- P1: Device health ingestion stores raw health JSON and extracted status fields for the development slice. Production alert thresholds, fleet views, and credential-bound health submission remain required before employee deployment.
 - P1: The current recompute path runs inline after ingestion for the development slice. The production worker claim/retry/generation model from the baseline still needs implementation.
 - P1: The activity report uses a fixed development enrollment mapping; real roster, assignment, schedule, timezone, and approved-hours data remain WP05/WP06 work.
 - P2: The server accepts sensitive fields inside raw payloads when the collector policy sends them; production access audit, retention, and role boundaries for those fields remain required before any real employee rollout.

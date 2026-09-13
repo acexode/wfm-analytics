@@ -44,6 +44,36 @@ if (args.Contains("--export-evidence-artifacts", StringComparer.Ordinal))
     return 0;
 }
 
+if (args.Contains("--collector-health", StringComparer.Ordinal))
+{
+    var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
+    var agentVersion = ReadStringOption(args, "--agent-version") ?? "0.1.0-live";
+    var key = WindowsDpapiKeyStore.LoadOrCreateKey(Path.Combine(queueRoot, LiveEvidenceRunner.ProtectedKeyFileName));
+    var queue = new FileBackedEncryptedQueue(queueRoot, new AesGcmPayloadProtector(key));
+    var health = CollectorHealth.Create(queueRoot, agentVersion, queue);
+    Console.WriteLine(JsonSerializer.Serialize(health, CollectorJson.Options));
+    return health.Warnings.Count == 0 ? 0 : 1;
+}
+
+if (args.Contains("--upload-collector-health", StringComparer.Ordinal))
+{
+    var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
+    var serverUrl = (ReadStringOption(args, "--server-url") ?? "http://127.0.0.1:5080").TrimEnd('/');
+    var enrollmentId = ReadStringOption(args, "--enrollment-id") ?? "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    var agentVersion = ReadStringOption(args, "--agent-version") ?? "0.1.0-live";
+    var key = WindowsDpapiKeyStore.LoadOrCreateKey(Path.Combine(queueRoot, LiveEvidenceRunner.ProtectedKeyFileName));
+    var queue = new FileBackedEncryptedQueue(queueRoot, new AesGcmPayloadProtector(key));
+    var health = CollectorHealth.Create(queueRoot, agentVersion, queue);
+
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    client.DefaultRequestHeaders.Add("X-WFM-Enrollment-Id", enrollmentId);
+    using var content = new StringContent(JsonSerializer.Serialize(health, CollectorJson.Options), Encoding.UTF8, "application/json");
+    using var response = await client.PostAsync($"{serverUrl}/api/v1/device/health", content);
+    var responseText = await response.Content.ReadAsStringAsync();
+    Console.WriteLine(responseText);
+    return response.IsSuccessStatusCode ? 0 : 1;
+}
+
 if (args.Contains("--upload-evidence-queue", StringComparer.Ordinal))
 {
     var queueRoot = ReadStringOption(args, "--queue-root") ?? Path.Combine("tmp", "wp03-live-queue");
@@ -186,6 +216,8 @@ Console.WriteLine("Use --evidence-live --duration-seconds 120 --out tmp/wp03-liv
 Console.WriteLine("Add --allow-window-titles, --allow-browser-urls, --allow-typed-text, --allow-screenshots, --allow-clipboard, or --allow-full-paths to test an expanded capture policy.");
 Console.WriteLine("Use --replay-evidence-queue --queue-root tmp/wp03-live-queue after a restart to verify queued payload replay.");
 Console.WriteLine("Use --export-evidence-artifacts --queue-root tmp/wp03-live-queue --out tmp/screenshots-review to decrypt screenshot artifacts for manual review.");
+Console.WriteLine("Use --collector-health --queue-root tmp/wp03-live-queue to inspect pending queue, loss manifest, Windows session state and deployment-hardening readiness.");
+Console.WriteLine("Use --upload-collector-health --queue-root tmp/wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd to send health to the development API.");
 Console.WriteLine("Use --upload-evidence-queue --queue-root tmp/wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd to send queued envelopes to the development API.");
 return 0;
 

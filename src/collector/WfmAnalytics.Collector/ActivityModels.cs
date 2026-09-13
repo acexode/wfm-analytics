@@ -16,7 +16,8 @@ public sealed record CollectorObservation(
     string? ApplicationId,
     bool IsLocked,
     TimeSpan TimeSinceLastInput,
-    SensitiveObservation? Sensitive = null);
+    SensitiveObservation? Sensitive = null,
+    WindowsSessionSnapshot? Session = null);
 
 public sealed record ActivitySlice(
     [property: JsonPropertyName("start_offset_ms")]

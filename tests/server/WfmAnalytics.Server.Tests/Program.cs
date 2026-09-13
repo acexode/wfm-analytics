@@ -102,7 +102,7 @@ static async Task DevelopmentHeadersAreIgnoredInProduction()
 static Task MigrationCatalogIsValid()
 {
     var catalog = new EmbeddedMigrationCatalog();
-    Equal(5, catalog.Migrations.Count);
+    Equal(7, catalog.Migrations.Count);
     Equal(1L, catalog.Migrations[0].Version);
     Equal(64, catalog.Migrations[0].Sha256.Length);
     True(catalog.Migrations[0].Sql.Contains("platform.schema_migrations", StringComparison.Ordinal), "Migration ledger is missing.");
@@ -198,6 +198,7 @@ static async Task DatabaseIntegration()
             Equal(HttpStatusCode.Forbidden, response.StatusCode);
         });
         await WithServer("Development", AssertActivityIngestion);
+        await WithServer("Development", AssertDeviceHealthIngestion);
         await using var production = ServerApplication.Build(environmentName: "Production");
         try
         {
@@ -235,7 +236,7 @@ static async Task ClearActivityReportsAsync(string testConnection)
 {
     await using var connection = new NpgsqlConnection(testConnection);
     await connection.OpenAsync();
-    await using var clear = new NpgsqlCommand("DELETE FROM analytics.activity_daily_reports; DELETE FROM ingestion.activity_dirty_days; DELETE FROM ingestion.activity_envelopes; DELETE FROM ingestion.ingestion_receipts;", connection);
+    await using var clear = new NpgsqlCommand("DELETE FROM analytics.activity_daily_reports; DELETE FROM ingestion.activity_dirty_days; DELETE FROM ingestion.activity_envelopes; DELETE FROM ingestion.ingestion_receipts; DELETE FROM ingestion.device_health_reports;", connection);
     await clear.ExecuteNonQueryAsync();
 }
 
@@ -311,6 +312,50 @@ static async Task AssertActivityIngestion(HttpClient client)
         True(payload.RootElement.GetProperty("employees")[0].GetProperty("categories").GetProperty("active_seconds").GetInt32() >= 60, "Accepted activity was not aggregated into active seconds.");
         Equal("source_not_connected", payload.RootElement.GetProperty("employees")[0].GetProperty("output").GetProperty("unavailable_reason").GetString() ?? "");
     }
+}
+
+static async Task AssertDeviceHealthIngestion(HttpClient client)
+{
+    client.DefaultRequestHeaders.Add("X-WFM-Enrollment-Id", "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    using var accepted = await client.PostAsync("/api/v1/device/health", Json("""
+    {
+      "checked_at": "2026-09-13T09:00:00Z",
+      "machine_name": "TEST-DEVICE",
+      "user_name": "test-user",
+      "process_id": 1234,
+      "process_session_id": "windows-session-1",
+      "agent_version": "0.1.0-test",
+      "queue": {
+        "checked_at": "2026-09-13T09:00:00Z",
+        "queue_root": "tmp\\test",
+        "pending_payload_count": 2,
+        "pending_payload_bytes": 1024,
+        "oldest_pending_end_utc": "2026-09-13T08:59:00Z",
+        "newest_pending_end_utc": "2026-09-13T09:00:00Z",
+        "loss_record_count": 1,
+        "lost_payload_count": 3,
+        "lost_payload_bytes": 2048,
+        "within_byte_limit": true,
+        "within_age_limit": true
+      },
+      "session": {
+        "session_id": "windows-session-1",
+        "session_number": 1,
+        "connect_state": "active",
+        "user_name": "test-user",
+        "domain_name": "TEST",
+        "source": "wts"
+      },
+      "tamper_resistance": [],
+      "warnings": ["local_queue_loss_manifest_present"]
+    }
+    """));
+    Equal(HttpStatusCode.OK, accepted.StatusCode);
+    using var payload = System.Text.Json.JsonDocument.Parse(await accepted.Content.ReadAsStringAsync());
+    Equal("accepted", payload.RootElement.GetProperty("status").GetString() ?? "");
+
+    using var missingQueue = await client.PostAsync("/api/v1/device/health", Json("""{"checked_at":"2026-09-13T09:00:00Z","agent_version":"x"}"""));
+    Equal(HttpStatusCode.BadRequest, missingQueue.StatusCode);
 }
 
 static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");

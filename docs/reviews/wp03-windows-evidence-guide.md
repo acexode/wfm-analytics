@@ -49,6 +49,12 @@ $report.resources | Select-Object -First 5
 $report.sample_gaps
 ```
 
+Inspect local collector health, retention state, loss manifest totals, WTS session state, and tamper-resistance readiness:
+
+```powershell
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --collector-health --queue-root tmp\wp03-live-queue
+```
+
 Export encrypted screenshot artifacts for manual review:
 
 ```powershell
@@ -81,6 +87,9 @@ $env:ASPNETCORE_URLS='http://127.0.0.1:5080'
 # Then upload the queue:
 & 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --upload-evidence-queue --queue-root tmp\wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd
 
+# Upload current collector health:
+& 'C:\Program Files\dotnet\dotnet.exe' run --no-build --project src/collector/WfmAnalytics.Collector -- --upload-collector-health --queue-root tmp\wp03-live-queue --server-url http://127.0.0.1:5080 --enrollment-id dddddddd-dddd-4ddd-8ddd-dddddddddddd
+
 # Confirm the daily report now uses live development evidence:
 Invoke-RestMethod -Uri 'http://127.0.0.1:5080/api/v1/teams/team-synthetic/daily?date=2026-09-13' -Headers @{'X-Development-Principal'='demo-manager'; 'X-Development-Scopes'='analytics:daily:read'} | ConvertTo-Json -Depth 8
 ```
@@ -97,10 +106,12 @@ Expected evidence:
 - encrypted payload count equals replayed payload count;
 - `replay_identity_matches` is `true`;
 - `plaintext_leak_detected` is `false`;
-- `session_events` includes `session_observed_start`, one initial lock-state event, any `workstation_locked` or `workstation_unlocked` transitions observed during the run, and `session_observed_end`;
+- `session_events` includes `session_observed_start`, one initial lock-state event, any WTS session-state evidence available to the current process, any `workstation_locked` or `workstation_unlocked` transitions observed during the run, and `session_observed_end`;
+- `--collector-health` reports pending queue count and bytes, oldest pending item, loss manifest totals, current WTS session state, and tamper-resistance controls;
 - resource samples are present for the collector process;
 - sleep/resume or long interruption appears as a sample gap instead of fabricated activity.
 - successful upload reports `accepted` or `already_accepted` outcomes and acknowledges only those queue items;
+- successful health upload reports `"status":"accepted"`;
 - the daily report returns `synthetic: false` for dates with uploaded live development evidence, while completed output remains unavailable until an approved operational source is connected.
 
 Record the command output and keep `tmp\wp03-live-evidence.json` with the review notes. This evidence supports WP03 only; it does not authorize employee deployment or close the full G1 gate without independent review and the remaining controlled-device checks.

@@ -11,10 +11,14 @@ var tests = new (string Name, Action Run)[]
     ("bucket slices are ordered and capped", BucketSlicesAreOrderedAndCapped),
     ("partial buckets stop at last healthy sample", PartialBucketsStopAtLastHealthySample),
     ("encrypted queue replays exact envelope without plaintext leak", EncryptedQueueReplay),
+    ("encrypted queue enforces retention cap with loss manifest", EncryptedQueueRetentionCap),
     ("DPAPI queue key survives process-style reload on Windows", DpapiQueueKeySurvivesReload),
     ("encrypted artifact store hides screenshot bytes and exports on demand", EncryptedArtifactStoreExport),
     ("sensitive fields are dropped unless policy enables them", SensitiveFieldsRequirePolicy),
     ("session event tracker records observed start end and lock transitions", SessionEventTrackerRecordsTransitions),
+    ("session event tracker records WTS state transitions", SessionEventTrackerRecordsWtsStateTransitions),
+    ("windows session probe maps service session changes", WindowsSessionProbeMapsServiceChanges),
+    ("service session change tracker emits auditable event", ServiceSessionChangeTrackerEmitsEvent),
     ("collector batch JSON uses accepted snake_case contract names", CollectorBatchJsonUsesContractNames),
 };
 
@@ -114,6 +118,26 @@ static void EncryptedQueueReplay()
     True(queue.ListPending().Count == 0, "Acknowledged payload remained pending.");
 }
 
+static void EncryptedQueueRetentionCap()
+{
+    var root = Path.Combine(Path.GetTempPath(), "wfm-collector-retention-tests", Guid.NewGuid().ToString("N"));
+    var queue = new FileBackedEncryptedQueue(
+        root,
+        new AesGcmPayloadProtector(RandomNumberGenerator.GetBytes(32)),
+        new QueueRetentionOptions(TimeSpan.FromDays(7), 1));
+
+    queue.Enqueue(BuildEnvelope(new RawObservation("2026-09-13T09:00:00Z", "old.exe", false, TimeSpan.Zero)));
+
+    Equal(0, queue.ListPending().Count);
+    var loss = queue.ListLosses().Single();
+    Equal(1, loss.PayloadCount);
+    True(loss.PayloadBytes > 0, "Loss manifest did not record dropped bytes.");
+    Equal("queue_retention_cap", loss.Reason);
+    var health = queue.GetHealth(DateTimeOffset.Parse("2026-09-13T10:00:00Z"));
+    Equal(1, health.LossRecordCount);
+    Equal(1, health.LostPayloadCount);
+}
+
 static void PartialBucketsStopAtLastHealthySample()
 {
     var accumulator = NewAccumulator();
@@ -192,6 +216,49 @@ static void SessionEventTrackerRecordsTransitions()
     Equal("workstation_unlocked", tracker.Events[3].EventType);
     Equal("session_observed_end", tracker.Events[4].EventType);
     Equal("windows-session-1", tracker.Events[4].SessionId);
+}
+
+static void SessionEventTrackerRecordsWtsStateTransitions()
+{
+    var tracker = new SessionEventTracker("windows-session-1", DateTimeOffset.Parse("2026-09-13T09:00:00Z"));
+    tracker.Observe(new CollectorObservation(
+        DateTimeOffset.Parse("2026-09-13T09:00:01Z"),
+        TimeSpan.FromSeconds(1),
+        "teams.exe",
+        false,
+        TimeSpan.Zero,
+        Session: new WindowsSessionSnapshot("windows-session-1", 1, "active", "employee", "domain")));
+    tracker.Observe(new CollectorObservation(
+        DateTimeOffset.Parse("2026-09-13T09:00:05Z"),
+        TimeSpan.FromSeconds(5),
+        null,
+        false,
+        TimeSpan.Zero,
+        Session: new WindowsSessionSnapshot("windows-session-1", 1, "disconnected", "employee", "domain")));
+
+    Equal("session_state_initial_active", tracker.Events[2].EventType);
+    Equal("session_disconnected", tracker.Events[3].EventType);
+    Equal("wts", tracker.Events[3].Source);
+}
+
+static void WindowsSessionProbeMapsServiceChanges()
+{
+    Equal("session_logon", WindowsSessionProbe.EventTypeFromServiceSessionChange(0x5));
+    Equal("session_logoff", WindowsSessionProbe.EventTypeFromServiceSessionChange(0x6));
+    Equal("session_locked", WindowsSessionProbe.EventTypeFromServiceSessionChange(0x7));
+    Equal("session_unlocked", WindowsSessionProbe.EventTypeFromServiceSessionChange(0x8));
+    Equal("session_change_unknown", WindowsSessionProbe.EventTypeFromServiceSessionChange(0xff));
+}
+
+static void ServiceSessionChangeTrackerEmitsEvent()
+{
+    var at = DateTimeOffset.Parse("2026-09-13T09:00:00Z");
+    var sessionEvent = WindowsServiceSessionChangeTracker.FromServiceControlReason(0x5, 7, at);
+
+    Equal("session_logon", sessionEvent.EventType);
+    Equal("windows-session-7", sessionEvent.SessionId);
+    Equal("windows_service_control", sessionEvent.Source);
+    True(sessionEvent.Detail?.Contains("reason=0x5", StringComparison.Ordinal) == true, "Session change detail did not include the raw service-control reason.");
 }
 
 static void DpapiQueueKeySurvivesReload()

@@ -37,7 +37,10 @@ public sealed record QueueEvidence(
     [property: JsonPropertyName("replay_identity_matches")] bool ReplayIdentityMatches,
     [property: JsonPropertyName("plaintext_leak_detected")] bool PlaintextLeakDetected,
     [property: JsonPropertyName("leaked_tokens")] IReadOnlyList<string> LeakedTokens,
-    [property: JsonPropertyName("ciphertext_bytes")] long CiphertextBytes);
+    [property: JsonPropertyName("ciphertext_bytes")] long CiphertextBytes,
+    [property: JsonPropertyName("loss_record_count")] int LossRecordCount,
+    [property: JsonPropertyName("lost_payload_count")] int LostPayloadCount,
+    [property: JsonPropertyName("oldest_pending_end_utc")] DateTimeOffset? OldestPendingEndUtc);
 
 public sealed record ArtifactEvidence(
     [property: JsonPropertyName("encrypted_artifact_count")] int EncryptedArtifactCount,
@@ -207,6 +210,7 @@ public static class LiveEvidenceRunner
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var leakedTokens = FindPlaintextTokens(ciphertextFiles, tokens);
+        var health = queue.GetHealth();
         return new QueueEvidence(
             queueRoot,
             WindowsDpapiKeyStore.ProtectionDescription,
@@ -215,7 +219,10 @@ public static class LiveEvidenceRunner
             ReplayIdentityMatches(replayed, replayed),
             leakedTokens.Count > 0,
             leakedTokens,
-            ciphertextFiles.Sum(path => new FileInfo(path).Length));
+            ciphertextFiles.Sum(path => new FileInfo(path).Length),
+            health.LossRecordCount,
+            health.LostPayloadCount,
+            health.OldestPendingEndUtc);
     }
 
     private static QueueEvidence WriteAndInspectQueue(string queueRoot, IReadOnlyList<ActivityEnvelope> envelopes, AesGcmPayloadProtector protector)
@@ -241,6 +248,7 @@ public static class LiveEvidenceRunner
         var ciphertextFiles = pending.Select(payload => payload.CiphertextPath).ToArray();
         var leakedTokens = FindPlaintextTokens(ciphertextFiles, tokens);
         var ciphertextBytes = ciphertextFiles.Sum(path => new FileInfo(path).Length);
+        var health = queue.GetHealth();
         return new QueueEvidence(
             queueRoot,
             WindowsDpapiKeyStore.ProtectionDescription,
@@ -249,7 +257,10 @@ public static class LiveEvidenceRunner
             replayIdentityMatches,
             leakedTokens.Count > 0,
             leakedTokens,
-            ciphertextBytes);
+            ciphertextBytes,
+            health.LossRecordCount,
+            health.LostPayloadCount,
+            health.OldestPendingEndUtc);
     }
 
     private static ArtifactEvidence InspectArtifacts(string queueRoot, EncryptedArtifactStore store)

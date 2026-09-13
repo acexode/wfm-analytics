@@ -56,6 +56,55 @@ public static class ActivityIngestionEndpoints
             return Results.Ok(new ActivityBatchResponse("1.0", batchId, outcomes));
         }).AllowAnonymous();
 
+        endpoints.MapPost("/api/v1/device/health", async (HttpRequest request, PostgresDatabase database, CancellationToken token) =>
+        {
+            if (!Guid.TryParse(request.Headers[EnrollmentHeader], out var enrollmentId))
+            {
+                return Results.BadRequest(new { code = "missing_or_invalid_enrollment" });
+            }
+
+            using var body = await TryReadJsonBodyAsync(request, token);
+            if (body is null)
+            {
+                return Results.BadRequest(new { code = "invalid_json_or_oversized_health" });
+            }
+
+            if (!TryReadHealth(body.RootElement, out var report, out var error))
+            {
+                return Results.BadRequest(new { code = error });
+            }
+
+            await using var connection = database.CreateConnection();
+            await connection.OpenAsync(token);
+            await using var insert = new NpgsqlCommand("""
+                INSERT INTO ingestion.device_health_reports(
+                    enrollment_id,
+                    checked_at,
+                    agent_version,
+                    queue_pending_payload_count,
+                    queue_pending_payload_bytes,
+                    queue_loss_record_count,
+                    queue_lost_payload_count,
+                    session_state,
+                    warnings,
+                    payload)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                """, connection);
+            insert.Parameters.AddWithValue(enrollmentId);
+            insert.Parameters.AddWithValue(report.CheckedAt);
+            insert.Parameters.AddWithValue(report.AgentVersion);
+            insert.Parameters.AddWithValue(report.QueuePendingPayloadCount);
+            insert.Parameters.AddWithValue(report.QueuePendingPayloadBytes);
+            insert.Parameters.AddWithValue(report.QueueLossRecordCount);
+            insert.Parameters.AddWithValue(report.QueueLostPayloadCount);
+            insert.Parameters.AddWithValue((object?)report.SessionState ?? DBNull.Value);
+            insert.Parameters.AddWithValue(report.Warnings);
+            insert.Parameters.AddWithValue(NpgsqlDbType.Jsonb, body.RootElement.GetRawText());
+            await insert.ExecuteNonQueryAsync(token);
+
+            return Results.Ok(new DeviceHealthResponse("1.0", enrollmentId, "accepted"));
+        }).AllowAnonymous();
+
         return endpoints;
     }
 
@@ -204,6 +253,56 @@ public static class ActivityIngestionEndpoints
         return true;
     }
 
+    private static bool TryReadHealth(JsonElement root, out DeviceHealthReport report, out string error)
+    {
+        report = default;
+        error = "invalid_device_health";
+        if (!TryDateTimeOffset(root, "checked_at", out var checkedAt)
+            || !TryString(root, "agent_version", out var agentVersion)
+            || !root.TryGetProperty("queue", out var queue)
+            || queue.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!TryInt32(queue, "pending_payload_count", out var pendingCount)
+            || !TryInt64(queue, "pending_payload_bytes", out var pendingBytes)
+            || !TryInt32(queue, "loss_record_count", out var lossRecordCount)
+            || !TryInt32(queue, "lost_payload_count", out var lostPayloadCount)
+            || pendingCount < 0
+            || pendingBytes < 0
+            || lossRecordCount < 0
+            || lostPayloadCount < 0)
+        {
+            error = "invalid_queue_health";
+            return false;
+        }
+
+        string? sessionState = null;
+        if (root.TryGetProperty("session", out var session)
+            && session.ValueKind == JsonValueKind.Object
+            && session.TryGetProperty("connect_state", out var state)
+            && state.ValueKind == JsonValueKind.String)
+        {
+            sessionState = state.GetString();
+        }
+
+        var warnings = Array.Empty<string>();
+        if (root.TryGetProperty("warnings", out var warningElement) && warningElement.ValueKind == JsonValueKind.Array)
+        {
+            warnings = warningElement
+                .EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString() ?? "")
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Take(50)
+                .ToArray();
+        }
+
+        report = new DeviceHealthReport(checkedAt, agentVersion, pendingCount, pendingBytes, lossRecordCount, lostPayloadCount, sessionState, warnings);
+        return true;
+    }
+
     private static async Task<ActivityOutcome> IngestEventAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid enrollmentId, ActivityEvent activityEvent, CancellationToken token)
     {
         await using (var existing = new NpgsqlCommand("SELECT payload_checksum FROM ingestion.ingestion_receipts WHERE enrollment_id=$1 AND event_id=$2", connection, transaction))
@@ -303,6 +402,12 @@ public static class ActivityIngestionEndpoints
         return element.TryGetProperty(property, out var child) && child.TryGetInt64(out value);
     }
 
+    private static bool TryInt32(JsonElement element, string property, out int value)
+    {
+        value = 0;
+        return element.TryGetProperty(property, out var child) && child.TryGetInt32(out value);
+    }
+
     private static bool TryDateTimeOffset(JsonElement element, string property, out DateTimeOffset value)
     {
         value = default;
@@ -317,6 +422,7 @@ public static class ActivityIngestionEndpoints
     private static bool IsAcceptedState(string? value) => value is "active" or "inactive" or "locked" or "detail_unavailable";
 
     private readonly record struct ActivityEvent(Guid EventId, string BootId, string SessionId, Guid CollectorInstanceId, long Sequence, DateTimeOffset BucketStart, DateTimeOffset BucketEnd, bool Coarsened, string RawJson, string PayloadChecksum);
+    private readonly record struct DeviceHealthReport(DateTimeOffset CheckedAt, string AgentVersion, int QueuePendingPayloadCount, long QueuePendingPayloadBytes, int QueueLossRecordCount, int QueueLostPayloadCount, string? SessionState, string[] Warnings);
     private sealed record ActivityBatchResponse(
         [property: JsonPropertyName("schema_version")] string SchemaVersion,
         [property: JsonPropertyName("batch_id")] Guid BatchId,
@@ -327,4 +433,9 @@ public static class ActivityIngestionEndpoints
         [property: JsonPropertyName("status")] string Status,
         [property: JsonPropertyName("rejection_reason")] string? RejectionReason,
         [property: JsonIgnore] bool AcceptedNew);
+
+    private sealed record DeviceHealthResponse(
+        [property: JsonPropertyName("schema_version")] string SchemaVersion,
+        [property: JsonPropertyName("enrollment_id")] Guid EnrollmentId,
+        [property: JsonPropertyName("status")] string Status);
 }

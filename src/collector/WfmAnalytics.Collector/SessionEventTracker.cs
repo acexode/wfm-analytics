@@ -14,6 +14,7 @@ public sealed class SessionEventTracker
     private readonly string _sessionId;
     private readonly List<WindowsSessionEvent> _events = [];
     private bool? _previousLocked;
+    private string? _previousConnectState;
 
     public SessionEventTracker(string sessionId, DateTimeOffset startedAt)
     {
@@ -33,7 +34,11 @@ public sealed class SessionEventTracker
                 observation.TimestampUtc,
                 _sessionId,
                 "interactive_probe"));
-            return;
+        }
+
+        if (observation.Session is not null)
+        {
+            ObserveSessionState(observation);
         }
 
         if (_previousLocked == observation.IsLocked)
@@ -47,6 +52,34 @@ public sealed class SessionEventTracker
             observation.TimestampUtc,
             _sessionId,
             "interactive_probe"));
+    }
+
+    private void ObserveSessionState(CollectorObservation observation)
+    {
+        var state = observation.Session!.ConnectState;
+        if (_previousConnectState is null)
+        {
+            _previousConnectState = state;
+            _events.Add(new WindowsSessionEvent(
+                $"session_state_initial_{state}",
+                observation.TimestampUtc,
+                observation.Session.SessionId,
+                observation.Session.Source));
+            return;
+        }
+
+        if (string.Equals(_previousConnectState, state, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _previousConnectState = state;
+        _events.Add(new WindowsSessionEvent(
+            state is "active" or "connected" ? "session_connected" : "session_disconnected",
+            observation.TimestampUtc,
+            observation.Session.SessionId,
+            observation.Session.Source,
+            $"connect_state={state}"));
     }
 
     public void Complete(DateTimeOffset endedAt)

@@ -24,7 +24,7 @@ public static partial class WindowsProbe
             ScreenshotRef: null,
             ClipboardText: null,
             foreground.FullPath).ApplyPolicy(policy.SensitiveCapture);
-        return new CollectorObservation(nowUtc, monotonicElapsed, foreground.ProcessName, isLocked, idle, sensitive);
+        return new CollectorObservation(nowUtc, monotonicElapsed, foreground.ProcessName, isLocked, idle, sensitive, WindowsSessionProbe.TryGetCurrentSession());
     }
 
     private static ForegroundProcessInfo TryGetForegroundProcessInfo(SensitiveCaptureSettings settings)
