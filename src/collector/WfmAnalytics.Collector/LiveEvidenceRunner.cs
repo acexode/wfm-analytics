@@ -24,6 +24,7 @@ public sealed record LiveEvidenceReport(
     [property: JsonPropertyName("batch")] CollectorBatch Batch,
     [property: JsonPropertyName("queue")] QueueEvidence Queue,
     [property: JsonPropertyName("artifacts")] ArtifactEvidence Artifacts,
+    [property: JsonPropertyName("session_events")] IReadOnlyList<WindowsSessionEvent> SessionEvents,
     [property: JsonPropertyName("resources")] IReadOnlyList<ResourceSample> Resources,
     [property: JsonPropertyName("sample_gaps")] IReadOnlyList<SampleGap> SampleGaps,
     [property: JsonPropertyName("notes")] IReadOnlyList<string> Notes);
@@ -85,6 +86,7 @@ public static class LiveEvidenceRunner
         var resources = new List<ResourceSample>();
         var gaps = new List<SampleGap>();
         var started = DateTimeOffset.UtcNow;
+        var sessionEvents = new SessionEventTracker(sessionId, started);
         var stopwatch = Stopwatch.StartNew();
         var previousSampleAt = started;
         using var process = Process.GetCurrentProcess();
@@ -115,6 +117,7 @@ public static class LiveEvidenceRunner
                 };
             }
 
+            sessionEvents.Observe(observation);
             var envelope = collector.Observe(observation);
             if (envelope is not null)
             {
@@ -132,6 +135,8 @@ public static class LiveEvidenceRunner
             completed.Add(partial);
         }
 
+        var ended = DateTimeOffset.UtcNow;
+        sessionEvents.Complete(ended);
         var batch = new CollectorBatch("1.0", Guid.NewGuid(), "0.1.0-live-evidence", policy.PolicyVersion, completed);
         var queue = WriteAndInspectQueue(options.QueueRoot, completed, protector);
         var artifacts = InspectArtifacts(options.QueueRoot, artifactStore);
@@ -147,7 +152,7 @@ public static class LiveEvidenceRunner
             "Lock detection uses interactive desktop accessibility and must be confirmed on the controlled company Windows device."
         };
 
-        var report = new LiveEvidenceReport(started, DateTimeOffset.UtcNow, options.IntervalMs, bootId, sessionId, collectorInstanceId, policy, batch, queue, artifacts, resources, gaps, notes);
+        var report = new LiveEvidenceReport(started, ended, options.IntervalMs, bootId, sessionId, collectorInstanceId, policy, batch, queue, artifacts, sessionEvents.Events, resources, gaps, notes);
         await File.WriteAllTextAsync(options.OutputPath, JsonSerializer.Serialize(report, CollectorJson.Options), cancellationToken);
         return report;
     }

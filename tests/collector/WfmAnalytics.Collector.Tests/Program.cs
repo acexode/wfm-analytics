@@ -14,6 +14,7 @@ var tests = new (string Name, Action Run)[]
     ("DPAPI queue key survives process-style reload on Windows", DpapiQueueKeySurvivesReload),
     ("encrypted artifact store hides screenshot bytes and exports on demand", EncryptedArtifactStoreExport),
     ("sensitive fields are dropped unless policy enables them", SensitiveFieldsRequirePolicy),
+    ("session event tracker records observed start end and lock transitions", SessionEventTrackerRecordsTransitions),
     ("collector batch JSON uses accepted snake_case contract names", CollectorBatchJsonUsesContractNames),
 };
 
@@ -174,6 +175,23 @@ static void SensitiveFieldsRequirePolicy()
     Equal("clipboard secret", clipboardScreenshotEnvelope.Slices.Single().Sensitive?.ClipboardText ?? "");
     Equal(null, clipboardScreenshotEnvelope.Slices.Single().Sensitive?.WindowTitle);
     Equal(null, clipboardScreenshotEnvelope.Slices.Single().Sensitive?.FullPath);
+}
+
+static void SessionEventTrackerRecordsTransitions()
+{
+    var tracker = new SessionEventTracker("windows-session-1", DateTimeOffset.Parse("2026-09-13T09:00:00Z"));
+    tracker.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:01Z"), TimeSpan.FromSeconds(1), "teams.exe", false, TimeSpan.Zero));
+    tracker.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:05Z"), TimeSpan.FromSeconds(5), null, true, TimeSpan.Zero));
+    tracker.Observe(new CollectorObservation(DateTimeOffset.Parse("2026-09-13T09:00:10Z"), TimeSpan.FromSeconds(10), "teams.exe", false, TimeSpan.Zero));
+    tracker.Complete(DateTimeOffset.Parse("2026-09-13T09:00:15Z"));
+
+    Equal(5, tracker.Events.Count);
+    Equal("session_observed_start", tracker.Events[0].EventType);
+    Equal("lock_state_initial_unlocked", tracker.Events[1].EventType);
+    Equal("workstation_locked", tracker.Events[2].EventType);
+    Equal("workstation_unlocked", tracker.Events[3].EventType);
+    Equal("session_observed_end", tracker.Events[4].EventType);
+    Equal("windows-session-1", tracker.Events[4].SessionId);
 }
 
 static void DpapiQueueKeySurvivesReload()

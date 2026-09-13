@@ -44,6 +44,7 @@ $report.batch.events | ForEach-Object { $_.slices } | Select-Object start_offset
 $report.batch.events | ForEach-Object { $_.slices } | Select-Object start_offset_ms,end_offset_ms,@{Name='screenshot';Expression={$_.sensitive.screenshot_ref}},@{Name='clipboard_chars';Expression={ if ($_.sensitive.clipboard_text) { $_.sensitive.clipboard_text.Length } else { 0 } }}
 $report.artifacts
 $report.queue
+$report.session_events | Select-Object event_type,at,session_id,source
 $report.resources | Select-Object -First 5
 $report.sample_gaps
 ```
@@ -96,6 +97,7 @@ Expected evidence:
 - encrypted payload count equals replayed payload count;
 - `replay_identity_matches` is `true`;
 - `plaintext_leak_detected` is `false`;
+- `session_events` includes `session_observed_start`, one initial lock-state event, any `workstation_locked` or `workstation_unlocked` transitions observed during the run, and `session_observed_end`;
 - resource samples are present for the collector process;
 - sleep/resume or long interruption appears as a sample gap instead of fabricated activity.
 - successful upload reports `accepted` or `already_accepted` outcomes and acknowledges only those queue items;

@@ -20,6 +20,7 @@ if (args.Contains("--evidence-live", StringComparer.Ordinal))
         report.Queue.EncryptedPayloadCount,
         report.Queue.ReplayedPayloadCount,
         report.Queue.PlaintextLeakDetected,
+        session_event_count = report.SessionEvents.Count,
         sample_gap_count = report.SampleGaps.Count,
         resource_sample_count = report.Resources.Count
     }, CollectorJson.Options));
