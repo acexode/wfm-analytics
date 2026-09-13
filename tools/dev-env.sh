@@ -6,8 +6,15 @@ export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 export DOTNET_GENERATE_ASPNET_CERTIFICATE=false
 export DOTNET_CLI_HOME="$WFM_ROOT/.local/dotnet-home"
 export NUGET_PACKAGES="$WFM_ROOT/.local/nuget"
+export NUGET_CONFIG_FILE="$WFM_ROOT/NuGet.Config"
 if [[ -x "$WFM_ROOT/.local/dotnet/dotnet" ]]; then
   export DOTNET_ROOT="$WFM_ROOT/.local/dotnet"
+  export PATH="$DOTNET_ROOT:$PATH"
+elif [[ -x "/c/Program Files/dotnet/dotnet" ]]; then
+  export DOTNET_ROOT="/c/Program Files/dotnet"
+  export PATH="$DOTNET_ROOT:$PATH"
+elif [[ -x "/mnt/c/Program Files/dotnet/dotnet" ]]; then
+  export DOTNET_ROOT="/mnt/c/Program Files/dotnet"
   export PATH="$DOTNET_ROOT:$PATH"
 fi
 WFM_BUNDLED_NODE_DIR="/Users/Sir Abubakar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin"

@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="WfmAnalytics.Server/WfmAnalytics.Server.csproj" />
+  <Project Path="../collector/WfmAnalytics.Collector/WfmAnalytics.Collector.csproj" />
   <Project Path="../../tests/server/WfmAnalytics.Server.Tests/WfmAnalytics.Server.Tests.csproj" />
+  <Project Path="../../tests/collector/WfmAnalytics.Collector.Tests/WfmAnalytics.Collector.Tests.csproj" />
 </Solution>
